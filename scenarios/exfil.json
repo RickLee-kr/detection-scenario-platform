@@ -1,0 +1,18 @@
+{
+  "scenario_id": "exfil",
+  "display_name": "Exfiltration",
+  "description": "Staging and transfer of collected data (HTTP/HTTPS, etc.) to validate DLP, NDR, and proxy alerts.",
+  "target_vms": ["windows-victim", "victim-linux"],
+  "caldera": {
+    "adversary_id": null,
+    "group": "red",
+    "planner": "atomic"
+  },
+  "expected_telemetry": [
+    "Large outbound transfers",
+    "Unusual destinations and ports",
+    "DLP or proxy block and warning events"
+  ],
+  "safety_notes": "Do not use real sensitive data. Use dummy files and lab-only payloads.",
+  "cleanup_notes": "Remove staging directories and temporary artifacts, then review VM snapshot state after the exfil simulation."
+}

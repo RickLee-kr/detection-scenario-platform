@@ -1,0 +1,19 @@
+[Unit]
+Description=XDR Lab host network persistence (br0 gateway + NAT contract)
+Documentation=file:///opt/xdr-lab/docs/release-hardening.md
+DefaultDependencies=yes
+After=openvswitch-switch.service network-pre.target network-online.target
+Wants=openvswitch-switch.service network-online.target
+Before=libvirtd.service caldera.service
+ConditionPathExists=/opt/xdr-lab/bootstrap/ensure-host-network.sh
+
+[Service]
+Type=oneshot
+ExecStart=/opt/xdr-lab/bootstrap/ensure-host-network.sh
+RemainAfterExit=yes
+TimeoutStartSec=180
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

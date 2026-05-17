@@ -1,0 +1,18 @@
+{
+  "scenario_id": "web",
+  "display_name": "Web",
+  "description": "HTTP requests and web-shell-like payloads to validate detection, blocking, and logging at the web layer.",
+  "target_vms": ["victim-linux", "windows-victim"],
+  "caldera": {
+    "adversary_id": null,
+    "group": "red",
+    "planner": "atomic"
+  },
+  "expected_telemetry": [
+    "Web proxy / WAF logs",
+    "HTTP 4xx/5xx and unusual User-Agent strings",
+    "IDS/NDR HTTP pattern alerts"
+  ],
+  "safety_notes": "Run only within CALDERA ability scope—not real vulnerability exploitation. Confirm egress policy to the public internet.",
+  "cleanup_notes": "Inspect the guest for leftover web roots or temp files, and consider snapshot revert."
+}

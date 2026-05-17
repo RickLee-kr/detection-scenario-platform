@@ -1,0 +1,1 @@
+"""Stellar appliance CLI package."""

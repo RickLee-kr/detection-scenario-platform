@@ -1,0 +1,30 @@
+#cloud-config
+hostname: test-vm1
+manage_etc_hosts: true
+
+users:
+  - name: lab
+    # Template-only default: replace with an operator key before use.
+    sudo: ALL=(ALL) ALL
+    shell: /bin/bash
+    lock_passwd: true
+    ssh_authorized_keys:
+      - "ssh-ed25519 REPLACE_WITH_OPERATOR_PUBLIC_KEY xdr-lab-operator"
+
+ssh_pwauth: false
+disable_root: false
+
+write_files:
+  - path: /etc/netplan/50-cloud-init.yaml
+    content: |
+      network:
+        version: 2
+        ethernets:
+          enp1s0:
+            dhcp4: false
+            addresses:
+              - 10.10.10.40/24
+
+runcmd:
+  - netplan apply
+  - systemctl enable --now ssh

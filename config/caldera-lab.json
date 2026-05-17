@@ -1,0 +1,98 @@
+{
+  "_doc": [
+    "MITRE CALDERA orchestration config — see docs/caldera-integration.md.",
+    "Strict JSON; '_doc' / '_help' keys are ignored by caldera_orchestration.py.",
+    "Full annotated template lives in config/caldera-lab.json.example."
+  ],
+  "schema_version": 1,
+  "base_url": "http://127.0.0.1:8888",
+  "api_key_env": "XDR_CALDERA_API_KEY",
+  "api_key_file": "/etc/xdr-lab/caldera-api-key",
+  "default_planner": "atomic",
+  "default_group": "red",
+  "plugins": [
+    "access",
+    "atomic",
+    "compass",
+    "debrief",
+    "fieldmanual",
+    "manx",
+    "response",
+    "sandcat",
+    "stockpile",
+    "training"
+  ],
+  "atomic_red_team": {
+    "linux_repo_path": "/opt/atomic-red-team",
+    "windows_repo_path": "C:\\AtomicRedTeam\\atomic-red-team",
+    "invoke_module_note": "Install-Module invoke-atomicredteam (optional; see bootstrap/)",
+    "safe_defaults_readme": "XDR-LAB-ATOMIC-SAFE.md"
+  },
+  "deployment": {
+    "_doc": "Informational only — caldera_orchestration.py never manages CALDERA's lifecycle.",
+    "mode": "auto",
+    "docker": {
+      "enabled": false,
+      "container_name": "caldera",
+      "compose_project_dir": ""
+    },
+    "standalone_python": {
+      "enabled": false,
+      "caldera_home": "",
+      "python_executable": "python3"
+    }
+  },
+  "scenarios": {
+    "_doc": "Set each scenario's adversary_id to a CALDERA adversary UUID — see docs §4.",
+    "recon": {
+      "adversary_id": null,
+      "description": "ping / nslookup / curl / scan (CALDERA adversary / operation)",
+      "_recommended_caldera_profile": "Discovery"
+    },
+    "web-test": {
+      "adversary_id": null,
+      "description": "HTTP / webshell simulation (CALDERA adversary / operation)",
+      "_recommended_caldera_profile": "Hunter / HTTP-heavy profile"
+    },
+    "lateral-movement": {
+      "adversary_id": null,
+      "description": "SMB / PsExec / RDP patterns (CALDERA adversary / operation)",
+      "_recommended_caldera_profile": "Worm / Mover (lateral movement)"
+    },
+    "exfiltration": {
+      "adversary_id": null,
+      "description": "staged upload/download (CALDERA adversary / operation)",
+      "_recommended_caldera_profile": "Thief / Collection-and-Exfil"
+    }
+  },
+  "agents": {
+    "_doc": "Lab VMs that receive Sandcat bootstrap via lab scenario agent deploy (SSH Linux paths; Windows path from lab-vms.json inventory).",
+    "sensor-vm": {
+      "enabled": true,
+      "bootstrap": "linux",
+      "ssh_user": "ubuntu"
+    },
+    "victim-linux": {
+      "enabled": true,
+      "bootstrap": "linux",
+      "ssh_user": ""
+    },
+    "windows-victim": {
+      "enabled": true,
+      "bootstrap": "windows",
+      "ssh_user": ""
+    }
+  },
+  "agent_vm_map": {
+    "_doc": "Match /api/agents rows via case-insensitive partial host_substrings against (paw, host, display_name, platform, group, contact).",
+    "sensor-vm": {
+      "host_substrings": ["sensor", "sensor-vm", "splunk", "ubuntu"]
+    },
+    "windows-victim": {
+      "host_substrings": ["windows", "victim", "win-victim", "win10", "workstation"]
+    },
+    "victim-linux": {
+      "host_substrings": ["victim-linux", "linux", "victim", "ubuntu", "debian"]
+    }
+  }
+}

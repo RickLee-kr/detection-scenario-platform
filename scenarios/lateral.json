@@ -1,0 +1,18 @@
+{
+  "scenario_id": "lateral",
+  "display_name": "Lateral movement",
+  "description": "Host-to-host movement patterns (SMB, PsExec, RDP, etc.) reproduced with a CALDERA adversary for observation.",
+  "target_vms": ["windows-victim", "victim-linux"],
+  "caldera": {
+    "adversary_id": null,
+    "group": "red",
+    "planner": "atomic"
+  },
+  "expected_telemetry": [
+    "SMB sessions and Kerberos events (Windows)",
+    "SSH and remote execution logs (Linux)",
+    "Same-credential or abnormal hop signals in NDR"
+  ],
+  "safety_notes": "No credential brute force or indiscriminate wide scans. Use lab-only accounts on an isolated network.",
+  "cleanup_notes": "Review shared sessions and remote service state; snapshot revert is often appropriate after lateral movement."
+}

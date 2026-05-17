@@ -1,0 +1,222 @@
+{
+  "_doc": [
+    "MITRE CALDERA orchestration config for XDR Lab.",
+    "Strict JSON: any '_doc' / '_help' keys are ignored by caldera_orchestration.py.",
+    "Operator workflow + adversary_id lookup + verification commands are in",
+    "  docs/caldera-integration.md (read that first).",
+    "Copy this file to config/caldera-lab.json and edit, OR override fields in place."
+  ],
+
+  "schema_version": 1,
+
+  "_help_base_url": [
+    "CALDERA REST endpoint reachable from the appliance host AND from each",
+    "lab VM (so Sandcat agents can call back).",
+    "Examples:",
+    "  http://127.0.0.1:8888           (CALDERA on the appliance host)",
+    "  http://10.10.10.40:8888         (CALDERA on test-vm1 inside the lab)",
+    "  https://caldera.example.lab     (operator-managed external instance)"
+  ],
+  "base_url": "http://127.0.0.1:8888",
+
+  "_help_plugins": [
+    "Operator memo: align with CALDERA server conf/default.yml plugins (orchestrator does not apply this automatically).",
+    "bootstrap/caldera-server-bootstrap.sh can override via CALDERA_PLUGINS (comma-separated env var).",
+    "Typically sandcat, stockpile, atomic (plugin ids) are needed for adversary emulation."
+  ],
+  "plugins": [
+    "access",
+    "atomic",
+    "compass",
+    "debrief",
+    "fieldmanual",
+    "manx",
+    "response",
+    "sandcat",
+    "stockpile",
+    "training"
+  ],
+
+  "_help_adversary_placeholder": [
+    "Fill scenarios.*.adversary_id here and caldera.adversary_id in scenarios/*.json",
+    "with the UUID from the CALDERA UI or REST.",
+    "If null, scenario pack validate emits a warning and non-dry-run scenario run is blocked."
+  ],
+
+  "_help_api_key": [
+    "API key resolution order (scripts/caldera_orchestration.py::resolve_api_key):",
+    "  1. env $XDR_CALDERA_API_KEY (highest priority, see docs/caldera-integration.md §3)",
+    "  2. api_key_file (absolute path; trimmed file contents — chmod 0600 recommended)",
+    "  3. env $api_key_env (defaults to XDR_CALDERA_API_KEY)",
+    "Bootstrap install default key file: /etc/xdr-lab/caldera-api-key (api_key_red in CALDERA conf/default.yml).",
+    "All REST requests send header 'KEY: <api_key>'. Unauthenticated GET /api/agents returns 302→/login.",
+    "Optional lab.env: set -a; . config/lab.env; set +a before aella_cli lab scenario …"
+  ],
+  "api_key_env": "XDR_CALDERA_API_KEY",
+  "api_key_file": "/etc/xdr-lab/caldera-api-key",
+
+  "_help_session_cookie": [
+    "Optional UI session cookie (rare; KEY header is the primary REST auth).",
+    "  1. env $XDR_CALDERA_SESSION_COOKIE",
+    "  2. session_cookie_file (absolute path)",
+    "  3. env $session_cookie_env (defaults to XDR_CALDERA_SESSION_COOKIE)"
+  ],
+  "session_cookie_env": "XDR_CALDERA_SESSION_COOKIE",
+  "session_cookie_file": "",
+
+  "_help_planner_group": [
+    "default_planner: CALDERA planner name. Built-ins include 'atomic',",
+    "  'batch', 'sequential'. Custom planners are recognized by their plugin id.",
+    "default_group: agent group that abilities target. Sandcat bootstraps",
+    "  register under this group by default ('red' is CALDERA's default red-team group)."
+  ],
+  "default_planner": "atomic",
+  "default_group": "red",
+
+  "_help_scenario_pack_dirs": [
+    "Optional list of extra directories (absolute paths) containing scenario pack files (.json/.yaml/.yml).",
+    "Search order is: <XDR_ROOT>/scenarios, <XDR_ROOT>/config/scenarios, then each entry here. See docs §4.4."
+  ],
+  "scenario_pack_dirs": [],
+
+  "_help_deployment": [
+    "Operator memo describing HOW the CALDERA server is hosted.",
+    "caldera_orchestration.py never starts/stops CALDERA itself — this block",
+    "is informational and surfaced under caldera.json::deployment for audit.",
+    "Set 'mode' to 'docker' | 'standalone_python' | 'external' | 'auto'."
+  ],
+  "deployment": {
+    "mode": "standalone_python",
+    "docker": {
+      "enabled": false,
+      "container_name": "caldera",
+      "compose_project_dir": ""
+    },
+    "standalone_python": {
+      "enabled": true,
+      "caldera_home": "/opt/caldera",
+      "python_executable": "/opt/caldera/.venv/bin/python3",
+      "systemd_unit": "caldera.service",
+      "bootstrap_script": "bootstrap/caldera-server-bootstrap.sh"
+    }
+  },
+
+  "_help_atomic_red_team": [
+    "Atomic Red Team repo/module paths (documentation and manual runs). caldera_orchestration.py does not consume this block.",
+    "Linux: bootstrap/atomic-red-team-linux.sh → ATOMIC_RED_TEAM_PATH=/opt/atomic-red-team recommended.",
+    "Windows: bootstrap/atomic-red-team-windows.ps1 → ATOMIC_RED_TEAM_PATH and repo at the same path."
+  ],
+  "atomic_red_team": {
+    "linux_repo_path": "/opt/atomic-red-team",
+    "windows_repo_path": "C:\\AtomicRedTeam\\atomic-red-team",
+    "invoke_module_note": "Install-Module invoke-atomicredteam (optional; see bootstrap scripts)",
+    "safe_defaults_readme": "XDR-LAB-ATOMIC-SAFE.md (created at repo root after clone)"
+  },
+
+  "_help_scenarios": [
+    "Merged with scenario packs under <XDR_ROOT>/scenarios/ and config/scenarios/ (docs §4.4).",
+    "Same scenario_id: pack wins; JSON here fills missing adversary_id / empty description only.",
+    "Legacy-only names (e.g. web-test) may stay here without a pack file.",
+    "How to find an adversary_id (see docs §4):",
+    "  - CALDERA UI URL: …/#/adversaries/<UUID>",
+    "  - REST: curl -H \"KEY: $XDR_CALDERA_API_KEY\" \\",
+    "          -X POST -H 'Content-Type: application/json' \\",
+    "          -d '{\"index\":\"adversaries\"}' $base_url/api/rest | jq",
+    "  - or: curl -H \"KEY: $XDR_CALDERA_API_KEY\" $base_url/api/v2/adversaries | jq",
+    "If adversary_id is null/empty, `scenario run` is REFUSED with status=blocked",
+    "(dry-run mode still simulates with a placeholder)."
+  ],
+  "scenarios": {
+    "recon": {
+      "_intent": "ping / nslookup / curl / scan-style discovery on the lab subnet",
+      "_recommended_caldera_profile": "Discovery (or any host/network discovery adversary)",
+      "adversary_id": null,
+      "description": "ping / nslookup / curl / scan (CALDERA adversary / operation)"
+    },
+    "web": {
+      "_intent": "HTTP / webshell-style patterns (scenario pack: scenarios/web.json)",
+      "_recommended_caldera_profile": "Hunter / custom HTTP-heavy adversary",
+      "adversary_id": null,
+      "description": "web scenario pack — set adversary_id before live run"
+    },
+    "c2": {
+      "_intent": "callback / C2-style channel simulation inside the lab only",
+      "_recommended_caldera_profile": "custom adversary with constrained callbacks",
+      "adversary_id": null,
+      "description": "c2 scenario pack — set adversary_id before live run"
+    },
+    "lateral": {
+      "_intent": "SMB / PsExec / RDP lateral movement (scenario pack: scenarios/lateral.json)",
+      "_recommended_caldera_profile": "Worm / Mover",
+      "adversary_id": null,
+      "description": "lateral scenario pack — set adversary_id before live run"
+    },
+    "exfil": {
+      "_intent": "staged upload/download (scenario pack: scenarios/exfil.json)",
+      "_recommended_caldera_profile": "Thief / Collection",
+      "adversary_id": null,
+      "description": "exfil scenario pack — set adversary_id before live run"
+    },
+    "web-test": {
+      "_intent": "HTTP fetches, webshell-style payload simulation",
+      "_recommended_caldera_profile": "Hunter / Information Gatherer or a custom HTTP-heavy profile",
+      "adversary_id": null,
+      "description": "HTTP / webshell simulation (CALDERA adversary / operation)"
+    },
+    "lateral-movement": {
+      "_intent": "SMB / PsExec / RDP movement between windows-victim and victim-linux",
+      "_recommended_caldera_profile": "Worm / Mover (lateral movement profile)",
+      "adversary_id": null,
+      "description": "SMB / PsExec / RDP patterns (CALDERA adversary / operation)"
+    },
+    "exfiltration": {
+      "_intent": "staged upload/download of collected files via HTTP/HTTPS",
+      "_recommended_caldera_profile": "Thief / Collection-and-Exfil profile",
+      "adversary_id": null,
+      "description": "staged upload/download (CALDERA adversary / operation)"
+    }
+  },
+
+  "_help_agent_vm_map": [
+    "Identify each lab VM in /api/agents by matching ANY of host_substrings",
+    "(case-insensitive, partial) against any of:",
+    "  paw, host, display_name, platform, group, contact",
+    "Add the actual hostname your image boots with (e.g. 'DESKTOP-XXXXXXX' for",
+    "Windows out-of-the-box installs)."
+  ],
+  "_help_agents": [
+    "Defines which lab VMs participate in `scenario agent deploy`.",
+    "bootstrap: linux | windows — selects bootstrap-linux.sh vs bootstrap-windows.ps1.",
+    "ssh_user: optional override; empty uses ubuntu (linux/sensor) or XDR_LAB_WINDOWS_SSH_USER / lab-vms.json ssh_user for Windows.",
+    "Windows: deploy transport is chosen from config/lab-vms.json external_nat_port_mapping",
+    "(SSH if ssh is mapped and reachable; else WinRM HTTPS if winrm_https is mapped; else RDP-only manual path)."
+  ],
+  "agents": {
+    "sensor-vm": {
+      "enabled": true,
+      "bootstrap": "linux",
+      "ssh_user": "ubuntu"
+    },
+    "victim-linux": {
+      "enabled": true,
+      "bootstrap": "linux",
+      "ssh_user": ""
+    },
+    "windows-victim": {
+      "enabled": true,
+      "bootstrap": "windows",
+      "ssh_user": ""
+    }
+  },
+  "agent_vm_map": {
+    "sensor-vm": {
+      "host_substrings": ["sensor", "sensor-vm", "splunk", "ubuntu"]
+    },
+    "windows-victim": {
+      "host_substrings": ["windows", "victim", "win-victim", "win10", "workstation"]
+    },
+    "victim-linux": {
+      "host_substrings": ["victim-linux", "linux", "victim", "ubuntu", "debian"]
+    }
+  }
+}

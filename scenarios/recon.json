@@ -1,0 +1,19 @@
+{
+  "scenario_id": "recon",
+  "display_name": "Reconnaissance",
+  "description": "Host and network discovery (ping, nslookup, curl, scan-like activity) to validate NDR, firewall, DNS, and ICMP telemetry.",
+  "target_vms": ["sensor-vm", "victim-linux", "windows-victim"],
+  "caldera": {
+    "adversary_id": null,
+    "group": "red",
+    "planner": "atomic"
+  },
+  "expected_telemetry": [
+    "DNS queries",
+    "ICMP echo/reply",
+    "HTTP/HTTPS sessions (when applicable)",
+    "Internal scan / ARP / flow logs (per sensor and NDR policy)"
+  ],
+  "safety_notes": "Discovery-style activity can add load to the internal network. Check maintenance windows and mirror/capture capacity.",
+  "cleanup_notes": "After `scenario stop`, revert the pre-run snapshot if needed. Sandcat and ability residue may still require guest-level checks."
+}

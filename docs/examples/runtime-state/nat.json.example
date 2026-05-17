@@ -1,0 +1,61 @@
+{
+  "ts": "2026-05-13T12:00:00Z",
+  "consistent": true,
+  "iptables_readable": true,
+  "iptables_error": null,
+  "authoritative_lab_subnet": "10.10.10.0/24",
+  "masquerade": {
+    "expected_source_cidr": "10.10.10.0/24",
+    "present": true,
+    "matching_rules": ["-A POSTROUTING -s 10.10.10.0/24 -j MASQUERADE"]
+  },
+  "forward": {
+    "expected_subnet": "10.10.10.0/24",
+    "present": true,
+    "matching_rules": ["-A FORWARD -s 10.10.10.0/24 -j ACCEPT"]
+  },
+  "dnat": [
+    {
+      "name": "sensor-vm-ssh",
+      "vm": "sensor-vm",
+      "internal_ip": "10.10.10.10",
+      "internal_port": 22,
+      "external_port": 1022,
+      "proto": "tcp",
+      "expected_to_destination": "10.10.10.10:22",
+      "present": true,
+      "matching_rules": ["-A XDR_LAB_DNAT -p tcp -m tcp --dport 1022 -j DNAT --to-destination 10.10.10.10:22"]
+    },
+    {
+      "name": "linux-server-ssh",
+      "vm": "linux-server",
+      "internal_ip": "10.10.10.20",
+      "internal_port": 22,
+      "external_port": 2022,
+      "proto": "tcp",
+      "expected_to_destination": "10.10.10.20:22",
+      "present": true,
+      "matching_rules": ["-A XDR_LAB_DNAT -p tcp -m tcp --dport 2022 -j DNAT --to-destination 10.10.10.20:22"]
+    },
+    {
+      "name": "windows-victim-rdp",
+      "vm": "windows-victim",
+      "internal_ip": "10.10.10.30",
+      "internal_port": 3389,
+      "external_port": 3389,
+      "proto": "tcp",
+      "expected_to_destination": "10.10.10.30:3389",
+      "present": true,
+      "matching_rules": ["-A XDR_LAB_DNAT -p tcp -m tcp --dport 3389 -j DNAT --to-destination 10.10.10.30:3389"]
+    }
+  ],
+  "web_console": {
+    "expected_external_port": 6080,
+    "expected_handler": "websockify+noVNC (local, not iptables; optional)",
+    "vm": "windows-victim",
+    "listen_local": false,
+    "present": false,
+    "_note": "Per-VM consoles use 6081/6082 via XDR_LAB_WEB_CONSOLE_PORT_MAP — see docs/web-console.md"
+  },
+  "missing": []
+}

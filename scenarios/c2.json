@@ -1,0 +1,18 @@
+{
+  "scenario_id": "c2",
+  "display_name": "C2 / Callback",
+  "description": "Callback and command-channel style behaviour (HTTP/DNS per CALDERA profile) to validate detection of agent/backdoor-like traffic.",
+  "target_vms": ["victim-linux", "windows-victim", "sensor-vm"],
+  "caldera": {
+    "adversary_id": null,
+    "group": "red",
+    "planner": "atomic"
+  },
+  "expected_telemetry": [
+    "Outbound sessions with unusual periodicity",
+    "DNS tunneling or long TXT records (profile-dependent)",
+    "Process and network connection telemetry (EDR / host logs)"
+  ],
+  "safety_notes": "Confirm firewall policy before any callback leaves the lab NAT. Do not use real external C2 infrastructure.",
+  "cleanup_notes": "On guests, check Sandcat processes, scheduled tasks, and persistence; revert VMs with snapshots if needed."
+}

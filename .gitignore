@@ -1,0 +1,53 @@
+# --- Large VM artefacts (NEVER commit) -------------------------------
+*.qcow2
+*.img
+*.vmdk
+*.iso
+*.raw
+*.bin
+
+# --- Operational state ------------------------------------------------
+logs/
+*.log
+*.log.*
+runtime/
+
+# --- Secrets / local environment -------------------------------------
+.env
+lab.env
+*.pem
+*.key
+*.crt
+authorized_keys
+operator-authorized_keys
+linux-server-authorized_keys
+
+# --- Python -----------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+pip-wheel-metadata/
+
+# --- Editors / IDEs ---------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# --- Cloud-init generated seeds (regeneratable; keep templates only) -
+cloud-init/*/seed.iso
+
+# --- Backups (large; keep out of git) --------------------------------
+backups/
+
+# --- Image cache (xdr-lab-vm-manager.sh) -----------------------------
+images/*/
+!images/.gitkeep

@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "network": {
+    "bridge": "br0",
+    "lab_subnet_cidr": "10.10.10.0/24",
+    "gateway": "10.10.10.1",
+    "dns": "10.10.10.1",
+    "netmask": "255.255.255.0",
+    "uplink_interface": null
+  },
+  "vms": {
+    "sensor-vm": {
+      "name": "sensor-vm",
+      "type": "sensor",
+      "hostname": "sensor-vm",
+      "virt_deploy_script_url": "https://REPLACE_ME.example.invalid/xdr-lab/virt_deploy_modular_ds.sh",
+      "image_url": "https://REPLACE_ME.example.invalid/xdr-lab/sensor-base.qcow2",
+      "bridge": "br0",
+      "cpu": 4,
+      "memory": 8192,
+      "disk_size_gb": 80,
+      "internal_ip": "10.10.10.10",
+      "external_nat_port_mapping": {
+        "ssh": 1022,
+        "https": 44110,
+        "ui": 8810
+      },
+      "autostart": true,
+      "sensor_cache_dir": "images/sensor",
+      "virt_deploy_script_name": "virt_deploy_modular_ds.sh",
+      "notes": "Replace URLs before production. CLI passes --nodownload when caches are warm."
+    },
+    "windows-victim": {
+      "name": "windows-victim",
+      "type": "windows",
+      "image_url": "https://REPLACE_ME.example.invalid/xdr-lab/windows-victim.qcow2",
+      "bridge": "br0",
+      "cpu": 2,
+      "memory": 4096,
+      "disk_size_gb": 80,
+      "internal_ip": "10.10.10.30",
+      "external_nat_port_mapping": {
+        "rdp": 3389,
+        "winrm_https": 45986
+      },
+      "autostart": true,
+      "os_variant": "win2k22",
+      "disk_filename": "windows-victim.qcow2",
+      "ssh_user": "lab"
+    },
+    "victim-linux": {
+      "name": "victim-linux",
+      "type": "linux",
+      "image_url": "https://REPLACE_ME.example.invalid/xdr-lab/victim-linux.qcow2",
+      "bridge": "br0",
+      "cpu": 2,
+      "memory": 2048,
+      "disk_size_gb": 40,
+      "internal_ip": "10.10.10.20",
+      "external_nat_port_mapping": {
+        "ssh": 2022
+      },
+      "autostart": true,
+      "os_variant": "ubuntu22.04",
+      "disk_filename": "victim-linux.qcow2"
+    },
+    "test-vm1": {
+      "name": "test-vm1",
+      "type": "linux",
+      "image_url": "https://REPLACE_ME.example.invalid/xdr-lab/test-vm1.qcow2",
+      "bridge": "br0",
+      "cpu": 1,
+      "memory": 1024,
+      "disk_size_gb": 20,
+      "internal_ip": "10.10.10.40",
+      "external_nat_port_mapping": {
+        "ssh": 22040
+      },
+      "autostart": false,
+      "os_variant": "generic",
+      "disk_filename": "test-vm1.qcow2"
+    }
+  },
+  "_future_capabilities": {
+    "ovs_mirror_automation": {"status": "implemented"},
+    "snapshot_management": {"status": "implemented"},
+    "attack_scenario_execution": {"status": "implemented_caldera_backed"},
+    "reverse_nat_verification": {"status": "implemented_read_only"},
+    "bas_integration": {"status": "implemented_caldera_backed"},
+    "edr_agent_deployment": {"status": "manual_or_external"}
+  }
+}

@@ -1,0 +1,22 @@
+[Unit]
+Description=MITRE CALDERA (XDR Lab)
+Documentation=file:///opt/xdr-lab/docs/caldera-integration.md
+After=network-online.target xdr-lab-host-network.service
+Wants=network-online.target xdr-lab-host-network.service
+ConditionPathExists=/opt/caldera/server.py
+
+[Service]
+Type=simple
+User=caldera
+Group=caldera
+WorkingDirectory=/opt/caldera
+Environment=PYTHONUNBUFFERED=1
+Environment=XDR_CALDERA_AUTH_DEBUG=1
+ExecStart=/opt/caldera/.venv/bin/python3 /opt/caldera/server.py --insecure --build
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=900
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

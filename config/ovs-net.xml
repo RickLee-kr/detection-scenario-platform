@@ -1,0 +1,7 @@
+<network>
+  <!-- OVS-backed libvirt network: br0 is an Open vSwitch bridge; guests use openvswitch virtualport. See docs/specs/006-network-architecture/spec.md -->
+  <name>ovs-net</name>
+  <forward mode='bridge'/>
+  <bridge name='br0'/>
+  <virtualport type='openvswitch'/>
+</network>
