@@ -59,6 +59,7 @@ mkdir -p \
   "${XDR_ROOT}/runtime/vnc-proxy" \
   "${XDR_ROOT}/runtime/web-console" \
   "${XDR_ROOT}/installer" \
+  "${XDR_ROOT}/patches/caldera" \
   "${XDR_ROOT}/logs"
 
 install -m 0644 "${SRC_CONFIG}/paths.sh"              "${XDR_ROOT}/config/paths.sh"
@@ -70,9 +71,20 @@ install -m 0644 "${SRC_SCRIPTS}/nat_state.py"          "${XDR_ROOT}/scripts/nat_
 install -m 0644 "${SRC_SCRIPTS}/snapshot_state.py"     "${XDR_ROOT}/scripts/snapshot_state.py"
 install -m 0644 "${SRC_SCRIPTS}/caldera_orchestration.py" "${XDR_ROOT}/scripts/caldera_orchestration.py"
 install -m 0644 "${SRC_SCRIPTS}/caldera_api_key_resolve.py" "${XDR_ROOT}/scripts/caldera_api_key_resolve.py"
+install -m 0644 "${SRC_SCRIPTS}/caldera_api_key_util.py" "${XDR_ROOT}/scripts/caldera_api_key_util.py"
+install -m 0644 "${SRC_SCRIPTS}/caldera_key_crypto.py" "${XDR_ROOT}/scripts/caldera_key_crypto.py"
+install -m 0644 "${SRC_SCRIPTS}/caldera_config_diag.py" "${XDR_ROOT}/scripts/caldera_config_diag.py"
+install -m 0644 "${SRC_SCRIPTS}/caldera_runtime_auth_diag.py" "${XDR_ROOT}/scripts/caldera_runtime_auth_diag.py"
+install -m 0644 "${SRC_SCRIPTS}/caldera_process_util.py" "${XDR_ROOT}/scripts/caldera_process_util.py"
 install -m 0644 "${SRC_SCRIPTS}/windows_lab_helpers.sh" "${XDR_ROOT}/scripts/windows_lab_helpers.sh"
 install -m 0644 "${SRC_SCRIPTS}/vnc_proxy_helpers.sh" "${XDR_ROOT}/scripts/vnc_proxy_helpers.sh"
 install -m 0755 "${SRC_SCRIPTS}/xdr-lab-vm-manager.sh" "${XDR_ROOT}/scripts/xdr-lab-vm-manager.sh"
+if [[ -f "${PROJECT_ROOT}/scripts/patch_caldera_auth_debug.py" ]]; then
+  install -m 0644 "${PROJECT_ROOT}/scripts/patch_caldera_auth_debug.py" "${XDR_ROOT}/scripts/patch_caldera_auth_debug.py"
+fi
+if [[ -f "${PROJECT_ROOT}/patches/caldera/xdr_auth_debug.py" ]]; then
+  install -m 0644 "${PROJECT_ROOT}/patches/caldera/xdr_auth_debug.py" "${XDR_ROOT}/patches/caldera/xdr_auth_debug.py"
+fi
 install -m 0755 "${PROJECT_ROOT}/installer/lab-host-web-console-deps.sh" "${XDR_ROOT}/installer/lab-host-web-console-deps.sh"
 install -m 0755 "${PROJECT_ROOT}/xdr-lab.sh" "${XDR_ROOT}/xdr-lab.sh"
 
@@ -81,11 +93,19 @@ for _rv_script in \
   validate-host-network.sh \
   validate-libvirt.sh \
   validate-caldera.sh \
+  verify-caldera-runtime.sh \
+  validate-sensor-identity.sh \
   validate-web-console.sh \
   validate-appliance.sh \
   ensure-caldera-runtime.sh \
+  ensure-caldera-api-key.sh \
   repair-caldera-service.sh \
+  sync-caldera-api-key-runtime.sh \
+  reconcile-caldera-auth-runtime.sh \
+  deploy-caldera-runtime-fix.sh \
   fix-runtime-state.sh \
+  ensure-ovs-mirror.sh \
+  validate-ovs-mirror.sh \
   ensure-host-network.sh \
   ensure-nat-contract.sh; do
   install -m 0755 "${SRC_BOOTSTRAP}/${_rv_script}" "${XDR_ROOT}/bootstrap/${_rv_script}"
@@ -123,6 +143,8 @@ ensure_xdr_lab_group() {
 configure_group_tree_writable() {
   local _dir
   ensure_xdr_lab_group
+  chown -R root:root "${XDR_ROOT}/config" "${XDR_ROOT}/scripts" "${XDR_ROOT}/bootstrap" "${XDR_ROOT}/installer"
+  chmod 0755 "${XDR_ROOT}/config" "${XDR_ROOT}/scripts" "${XDR_ROOT}/bootstrap" "${XDR_ROOT}/installer"
   for _dir in "${XDR_ROOT}/logs" "${XDR_ROOT}/runtime" "${XDR_ROOT}/runtime/state"; do
     chown root:"${XDR_LAB_GROUP}" "${_dir}"
     chmod 2775 "${_dir}"
@@ -189,7 +211,12 @@ install_systemd_unit xdr-lab-host-network.service
 
 if [[ -f /opt/caldera/server.py ]]; then
   id -u caldera >/dev/null 2>&1 || useradd --system --home-dir /opt/caldera --create-home --shell /bin/bash caldera 2>/dev/null || true
-  install_systemd_unit caldera.service
+  "${XDR_ROOT}/bootstrap/ensure-caldera-runtime.sh" \
+    || echo "WARN: ensure-caldera-runtime failed; run sudo ${XDR_ROOT}/bootstrap/deploy-caldera-runtime-fix.sh" >&2
+  "${XDR_ROOT}/bootstrap/ensure-caldera-api-key.sh" --wait \
+    || echo "WARN: ensure-caldera-api-key failed; run sudo ${XDR_ROOT}/bootstrap/ensure-caldera-api-key.sh --wait" >&2
+  "${XDR_ROOT}/bootstrap/repair-caldera-service.sh" --start \
+    || echo "WARN: repair-caldera-service failed; inspect journalctl -u caldera.service" >&2
 fi
 
 install_cli_editable() {
@@ -197,7 +224,7 @@ install_cli_editable() {
     venv)
       python3 -m venv "${CLI_VENV_DIR}"
       "${CLI_VENV_DIR}/bin/python" -m pip install --upgrade pip wheel
-      "${CLI_VENV_DIR}/bin/pip" install -e "${APP_DIR}"
+      "${CLI_VENV_DIR}/bin/pip" install --upgrade "${APP_DIR}"
       install -m 0755 /dev/stdin /usr/local/bin/aella_cli <<EOF
 #!/usr/bin/env bash
 exec "${CLI_VENV_DIR}/bin/aella_cli" "\$@"

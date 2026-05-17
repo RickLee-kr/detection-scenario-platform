@@ -65,8 +65,9 @@ def load_caldera_lab_config(xdr_root: Path | None = None) -> dict:
     candidates = [
         root / "config" / "caldera-lab.json",
         Path(os.environ.get("XDR_LAB_CALDERA_CONFIG", "")),
-        _SCRIPT_DIR.parent / "config" / "caldera-lab.json",
     ]
+    if os.environ.get("XDR_LAB_DEV_MODE", "").strip() in ("1", "true", "yes", "on"):
+        candidates.append(_SCRIPT_DIR.parent / "config" / "caldera-lab.json")
     for p in candidates:
         if p and p.is_file():
             with p.open(encoding="utf-8") as f:

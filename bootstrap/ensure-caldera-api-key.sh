@@ -228,6 +228,25 @@ install_key_file() {
   fi
 }
 
+sync_runtime_key_copy() {
+  local xdr_root="${XDR_ROOT:-/opt/xdr-lab}" resolver sync_rc=0
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    log "DRY-RUN: would sync runtime API key copy"
+    return 0
+  fi
+  resolver="${xdr_root}/scripts/caldera_api_key_resolve.py"
+  if [[ ! -f "${resolver}" && -f "${SCRIPT_DIR}/../scripts/caldera_api_key_resolve.py" ]]; then
+    resolver="${SCRIPT_DIR}/../scripts/caldera_api_key_resolve.py"
+  fi
+  [[ -f "${resolver}" ]] || return 0
+  python3 "${resolver}" --sync-runtime --xdr-root "${xdr_root}" --source "${API_KEY_FILE}" || sync_rc=$?
+  if [[ "${sync_rc}" -eq 0 ]]; then
+    log "Synced runtime API key copy: ${xdr_root}/runtime/caldera-api-key"
+  else
+    rv_log WARN "runtime API key copy sync failed"
+  fi
+}
+
 sync_config_and_file() {
   local mode="$1" py util extra=()
   py="$(caldera_python)" || { err "python3 not found (install CALDERA venv)"; return 2; }
@@ -334,6 +353,7 @@ fi
 
 if [[ -n "${existing_key}" ]]; then
   if probe_key_http_if_hash_ok "${existing_key}" "existing key"; then
+    sync_runtime_key_copy
     log "API key OK — GET ${AGENTS_URL} http_code=200 header=${RV_CALDERA_API_AUTH_HEADER}"
     exit 0
   fi

@@ -9,7 +9,10 @@ fi
 readonly _XDR_RUNTIME_VALIDATION_LIB_LOADED=1
 
 _XDR_BOOTSTRAP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -f "${_XDR_BOOTSTRAP_DIR}/../config/paths.sh" ]]; then
+: "${XDR_BASE:=/opt/xdr-lab}"
+: "${XDR_ROOT:=${XDR_BASE}}"
+: "${XDR_LAB_DEV_MODE:=0}"
+if [[ "${XDR_LAB_DEV_MODE}" == "1" && -f "${_XDR_BOOTSTRAP_DIR}/../config/paths.sh" ]]; then
   # shellcheck source=../config/paths.sh
   . "${_XDR_BOOTSTRAP_DIR}/../config/paths.sh"
 elif [[ -n "${XDR_ROOT:-}" && -f "${XDR_ROOT}/config/paths.sh" ]]; then
@@ -18,8 +21,10 @@ elif [[ -n "${XDR_ROOT:-}" && -f "${XDR_ROOT}/config/paths.sh" ]]; then
 fi
 
 : "${LAB_OVS_NETWORK:=ovs-net}"
+: "${LAB_BRIDGE:=br0}"
 : "${LAB_GATEWAY:=10.10.10.1}"
 : "${LAB_SUBNET_CIDR:=10.10.10.0/24}"
+: "${XDR_LOGS_DIR:=${XDR_ROOT}/logs}"
 : "${XDR_LAB_NAT_STATE_JSON:=${XDR_ROOT}/runtime/state/nat.json}"
 : "${XDR_LAB_CALDERA_CONFIG:=${XDR_ROOT}/config/caldera-lab.json}"
 : "${XDR_LAB_PROBE_TIMEOUT_SECS:=15}"
@@ -967,8 +972,23 @@ rv_caldera_http_probe_code() {
   echo "${code}"
 }
 
+rv_caldera_login_http_code() {
+  local url="$1" login_url hdr code
+  login_url="${url%/}/login"
+  hdr="$(rv_run_with_timeout "${XDR_LAB_HTTP_PROBE_TIMEOUT_SECS}" \
+    "curl -D - ${login_url}" \
+    curl -sS -D - -o /dev/null --connect-timeout 3 --max-time "${XDR_LAB_HTTP_PROBE_TIMEOUT_SECS}" \
+      "${login_url}" 2>/dev/null || true)"
+  code="$(awk 'toupper($1) ~ /^HTTP\// { c=$2 } END { if (c == "") print "000"; else print c }' <<<"${hdr}")"
+  echo "${code}"
+}
+
 rv_caldera_http_ready() {
   local url="$1" code
+  code="$(rv_caldera_login_http_code "${url}")"
+  if [[ "${code}" == "200" ]]; then
+    return 0
+  fi
   code="$(rv_caldera_http_probe_code "${url}")"
   [[ "${code}" =~ ^(200|302|401|403)$ ]]
 }
@@ -1067,7 +1087,7 @@ rv_caldera_wait_ready() {
   local timeout_secs="${1:-${XDR_LAB_CALDERA_READY_TIMEOUT_SECS}}"
   local poll_secs="${XDR_LAB_CALDERA_READY_POLL_SECS}"
   local progress_secs="${XDR_LAB_CALDERA_READY_PROGRESS_SECS}"
-  local port base_url started last_progress=0 elapsed state listen_ok http_ok agents_url
+  local port base_url started last_progress=0 elapsed state listen_ok http_ok agents_url login_code
 
   if [[ "${timeout_secs}" =~ ^https?:// ]]; then
     rv_log WARN "rv_caldera_wait_ready: numeric timeout expected, got URL — using default timeout"
@@ -1095,7 +1115,8 @@ rv_caldera_wait_ready() {
     if rv_caldera_port_listening "${port}"; then
       listen_ok=1
     fi
-    if rv_caldera_http_ready "${base_url}"; then
+    login_code="$(rv_caldera_login_http_code "${base_url}")"
+    if [[ "${login_code}" == "200" ]] || rv_caldera_http_ready "${base_url}"; then
       http_ok=1
     fi
 
@@ -1105,7 +1126,7 @@ rv_caldera_wait_ready() {
     fi
 
     if [[ "${http_ok}" -eq 1 ]]; then
-      echo "HTTP READY ${agents_url} (${elapsed}s)"
+      echo "HTTP READY /login http_code=${login_code} api_probe=${agents_url} (${elapsed}s)"
       return 0
     fi
     if [[ "${listen_ok}" -eq 1 ]]; then

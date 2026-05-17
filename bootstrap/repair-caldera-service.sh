@@ -136,16 +136,14 @@ if [[ "${DO_START}" -eq 1 ]]; then
     "${VENV_PY}" "${PATCH_PY}" --caldera-home "${CALDERA_HOME}" || rv_log WARN "patch_caldera_auth_debug failed (non-fatal)"
   fi
   rv_step_end "patch CALDERA auth debug hooks" 0
-  rv_step_begin "systemctl restart caldera.service"
+  rv_step_begin "restart caldera.service"
   systemctl reset-failed caldera.service 2>/dev/null || true
-  if ! rv_run_with_timeout 30 "systemctl restart caldera.service" \
-      systemctl restart caldera.service; then
-    rv_log WARN "systemctl restart returned non-zero — service may still be starting (TimeoutStartSec=900)"
+  if ! rv_caldera_restart_service "repair-caldera-service --start"; then
+    rv_log WARN "caldera restart helper returned non-zero — service may still be starting (TimeoutStartSec=900)"
   fi
-  rv_caldera_kill_stale_servers || true
   rv_caldera_assert_listener_is_systemd || true
   rv_caldera_log_runtime_auth_diag || true
-  rv_step_end "systemctl restart caldera.service" 0
+  rv_step_end "restart caldera.service" 0
 fi
 
 rv_log INFO "repair-caldera-service finished user=${RUNTIME_USER} start=${DO_START}"

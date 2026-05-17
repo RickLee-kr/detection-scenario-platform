@@ -20,9 +20,9 @@ from typing import FrozenSet, List, Optional, Sequence, Tuple
 
 LOG = logging.getLogger("aella_cli")
 
-# Runtime install target. Default is /opt/xdr-lab (set by cli-installer.sh);
-# override via XDR_BASE / XDR_LAB_MANAGER for development against the repository checkout.
-_XDR_BASE = Path(os.environ.get("XDR_BASE", "/opt/xdr-lab"))
+# Runtime install target. Default is /opt/xdr-lab (set by cli-installer.sh).
+# Development against a checkout must be explicit via XDR_LAB_MANAGER / XDR_LAB_CONFIG.
+_XDR_BASE = Path(os.environ.get("XDR_ROOT") or os.environ.get("XDR_BASE", "/opt/xdr-lab"))
 _CLI_MODULE_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _CLI_MODULE_DIR.parent
 
@@ -30,23 +30,24 @@ _REPO_ROOT = _CLI_MODULE_DIR.parent
 def _resolve_lab_manager() -> Path:
     if os.environ.get("XDR_LAB_MANAGER"):
         return Path(os.environ["XDR_LAB_MANAGER"])
-    dev_mgr = _REPO_ROOT / "scripts" / "xdr-lab-vm-manager.sh"
-    if dev_mgr.is_file():
-        return dev_mgr
     return _XDR_BASE / "scripts" / "xdr-lab-vm-manager.sh"
 
 
 def _resolve_lab_config() -> Path:
     if os.environ.get("XDR_LAB_CONFIG"):
         return Path(os.environ["XDR_LAB_CONFIG"])
-    dev_cfg = _REPO_ROOT / "config" / "lab-vms.json"
-    if dev_cfg.is_file():
-        return dev_cfg
     return _XDR_BASE / "config" / "lab-vms.json"
+
+
+def _resolve_bootstrap_dir() -> Path:
+    if os.environ.get("XDR_LAB_BOOTSTRAP_DIR"):
+        return Path(os.environ["XDR_LAB_BOOTSTRAP_DIR"])
+    return _XDR_BASE / "bootstrap"
 
 
 LAB_MANAGER = _resolve_lab_manager()
 LAB_CONFIG = _resolve_lab_config()
+BOOTSTRAP_DIR = _resolve_bootstrap_dir()
 
 LAB_KNOWN_VMS: FrozenSet[str] = frozenset(
     {"sensor-vm", "windows-victim", "victim-linux", "test-vm1"}
@@ -89,9 +90,11 @@ Core VM lifecycle:
   stop <vm|all> [--dry-run]
   destroy <vm|all> [--dry-run]
   status [vm] [--dry-run]   (default vm: all)
+  vm repair <vm> [--dry-run]
 
-Validation (delegates to xdr-lab-vm-manager.sh validate):
-  validate [vm|all] [--dry-run]   (default: all — virsh / ping / type-specific checks)
+Validation:
+  validate --strict [--wait] [--timeout SECONDS] [--dry-run]   (baseline: validate-appliance --strict)
+  validate [vm|all] [--dry-run]   (legacy VM checks; default: all)
 
 OVS mirror (delegates to xdr-lab-vm-manager.sh mirror):
   mirror apply [sensor-vm] [--dry-run]
@@ -101,6 +104,11 @@ OVS mirror (delegates to xdr-lab-vm-manager.sh mirror):
 NAT observability (read-only verify in engine):
   nat status [--dry-run]
   nat verify [--dry-run]
+
+CALDERA runtime:
+  caldera verify [--wait] [--dry-run]
+  caldera wait-ready [--dry-run]
+  agent deploy|verify [--json] [--dry-run]   (Sandcat helpers)
 
 Windows browser / VNC console hints:
   web-console start [vm] [--dry-run]   (default vm: windows-victim)
@@ -141,6 +149,9 @@ Runtime visibility (read-only; delegates to caldera_orchestration.py runtime):
   runtime evidence export-jsonl [--out FILE] [--lines N] [--filter REGEX] [--dry-run]
   runtime validate repeat|stale|cleanup|consistency [--json] [--dry-run]
   runtime preview [scenario_id] [--snapshot-before] [--json] [--dry-run]
+
+Debug:
+  debug paths [--dry-run]
 
   help                                 Show this message
 
@@ -266,6 +277,24 @@ def _require_lab_manager(*, dry_run: bool) -> None:
         raise SystemExit(2)
 
 
+def _require_bootstrap_script(name: str, *, dry_run: bool) -> Path:
+    script = BOOTSTRAP_DIR / name
+    if dry_run:
+        return script
+    if not script.is_file():
+        LOG.error(
+            "structured_log",
+            extra={"event": "bootstrap_script_missing", "path": str(script)},
+        )
+        print(
+            f"XDR Lab bootstrap script not found: {script}. "
+            "Install assets to /opt/xdr-lab (see cli-installer.sh).",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+    return script
+
+
 def _validate_lab_vm(name: str, *, allow_all: bool) -> None:
     if allow_all and name == "all":
         return
@@ -303,6 +332,27 @@ def _strip_flags(tokens: List[str], flags: Sequence[str]) -> Tuple[List[str], di
     return out, seen
 
 
+def _failure_class(rc: int, err: str) -> str:
+    text = (err or "").lower()
+    if rc == 0:
+        return "ok"
+    if "permission denied" in text or "operation not permitted" in text or "sudo" in text:
+        if "ovs" in text or "ovsdb" in text:
+            return "ovs_privilege"
+        if "iptables" in text or "xtables" in text:
+            return "iptables_privilege"
+        if "libvirt" in text or "virsh" in text or "hypervisor" in text:
+            return "libvirt_privilege"
+        return "permission_denied"
+    if "caldera" in text and ("api" in text or "key" in text or "authenticated" in text):
+        return "caldera_api_not_authenticated"
+    if "not found" in text or "required command" in text:
+        return "missing_dependency"
+    if "nvram" in text or "ovmf" in text or "pflash" in text:
+        return "windows_nvram"
+    return "runtime_failure"
+
+
 def _lab_manager_argv(action: str, target: str, extra: Optional[List[str]] = None) -> List[str]:
     cmd: List[str] = [str(LAB_MANAGER), action, target]
     if extra:
@@ -314,13 +364,14 @@ def _lab_script_argv(parts: Sequence[str]) -> List[str]:
     return [str(LAB_MANAGER), *list(parts)]
 
 
-def _lab_failure_notice(argv: List[str], rc: int) -> None:
+def _lab_failure_notice(argv: List[str], rc: int, err: str = "") -> None:
     if rc == 0:
         return
     script = os.path.basename(argv[0]) if argv else "xdr-lab-vm-manager.sh"
+    klass = _failure_class(rc, err)
     sys.stderr.write(
         f"Error: lab command failed (exit {rc}). "
-        f"Review stderr above or check {script} logs (vm-manager.log).\n"
+        f"FAILURE_CLASS={klass}. Review stderr above or check {script} logs (vm-manager.log).\n"
     )
 
 
@@ -333,7 +384,7 @@ def _lab_invoke_script(argv_tail: Sequence[str], *, dry_run: bool) -> int:
     _require_lab_manager(dry_run=False)
     rc, out, err = shell_cmd_exec(argv)
     rc = _emit_streams(rc, out, err)
-    _lab_failure_notice(argv, rc)
+    _lab_failure_notice(argv, rc, err)
     return rc
 
 
@@ -352,7 +403,7 @@ def _lab_invoke_script_caldera_dry(argv_tail: Sequence[str], *, dry_run: bool) -
         env.pop("XDR_LAB_DRY_RUN", None)
     rc, out, err = shell_cmd_exec(argv, env=env)
     rc = _emit_streams(rc, out, err)
-    _lab_failure_notice(argv, rc)
+    _lab_failure_notice(argv, rc, err)
     return rc
 
 
@@ -371,7 +422,27 @@ def _lab_invoke_manager(
     _require_lab_manager(dry_run=False)
     rc, out, err = shell_cmd_exec(argv)
     rc = _emit_streams(rc, out, err)
-    _lab_failure_notice(argv, rc)
+    _lab_failure_notice(argv, rc, err)
+    return rc
+
+
+def _invoke_bootstrap_script(name: str, args: Sequence[str], *, dry_run: bool) -> int:
+    script = _require_bootstrap_script(name, dry_run=dry_run)
+    argv = [str(script), *list(args)]
+    if dry_run:
+        line = " ".join(shlex.quote(x) for x in argv)
+        sys.stdout.write(f"DRY-RUN: {line}\n")
+        return 0
+    rc, out, err = shell_cmd_exec(argv)
+    rc = _emit_streams(rc, out, err)
+    if rc != 0:
+        combined = f"{out}\n{err}"
+        marker = "FAILURE_CLASS="
+        if marker in combined:
+            klass = combined.rsplit(marker, 1)[1].split()[0].strip()
+        else:
+            klass = _failure_class(rc, err)
+        sys.stderr.write(f"Error: bootstrap command failed (exit {rc}). FAILURE_CLASS={klass}.\n")
     return rc
 
 
@@ -486,8 +557,22 @@ def lab_status_callback(argv: List[str], *, dry_run: bool) -> int:
 
 @log_command
 def lab_validate_callback(argv: List[str], *, dry_run: bool) -> int:
-    tokens, seen = _strip_flags(list(argv), ("--dry-run",))
+    tokens, seen = _strip_flags(list(argv), ("--dry-run", "--strict", "--wait"))
     dry_run = dry_run or seen["--dry-run"]
+    if seen["--strict"]:
+        args = ["--strict"]
+        if seen["--wait"]:
+            args.append("--wait")
+        if tokens:
+            if len(tokens) == 2 and tokens[0] == "--timeout" and tokens[1].isdigit():
+                args.extend(tokens)
+            else:
+                print(
+                    "Usage: aella_cli lab validate --strict [--wait] [--timeout SECONDS] [--dry-run]",
+                    file=sys.stderr,
+                )
+                return 2
+        return _invoke_bootstrap_script("validate-appliance.sh", args, dry_run=dry_run)
     target = "all"
     if tokens:
         target = tokens[0]
@@ -497,6 +582,98 @@ def lab_validate_callback(argv: List[str], *, dry_run: bool) -> int:
     if target != "all":
         _validate_lab_vm(target, allow_all=False)
     return _lab_invoke_manager("validate", target, dry_run=dry_run)
+
+
+@log_command
+def lab_caldera_callback(argv: List[str], *, dry_run: bool) -> int:
+    tokens, seen = _strip_flags(list(argv), ("--dry-run", "--wait"))
+    dry_run = dry_run or seen["--dry-run"]
+    if not tokens or tokens[0] not in ("verify", "wait-ready"):
+        print(
+            "Usage: aella_cli lab caldera verify [--wait] [--dry-run]\n"
+            "       aella_cli lab caldera wait-ready [--dry-run]",
+            file=sys.stderr,
+        )
+        return 2
+    if len(tokens) > 1:
+        print(f"Unexpected arguments: {' '.join(tokens[1:])}", file=sys.stderr)
+        return 2
+    args: List[str] = []
+    if seen["--wait"] or tokens[0] == "wait-ready":
+        args.append("--wait")
+    return _invoke_bootstrap_script("verify-caldera-runtime.sh", args, dry_run=dry_run)
+
+
+@log_command
+def lab_vm_callback(argv: List[str], *, dry_run: bool) -> int:
+    tokens, seen = _strip_flags(list(argv), ("--dry-run",))
+    dry_run = dry_run or seen["--dry-run"]
+    if len(tokens) != 2 or tokens[0] != "repair":
+        print("Usage: aella_cli lab vm repair <vm> [--dry-run]", file=sys.stderr)
+        return 2
+    vm = tokens[1]
+    _validate_lab_vm(vm, allow_all=False)
+    return _lab_invoke_script(["vm", "repair", vm], dry_run=dry_run)
+
+
+@log_command
+def lab_agent_callback(argv: List[str], *, dry_run: bool) -> int:
+    tokens, seen = _strip_flags(list(argv), ("--dry-run",))
+    dry_run = dry_run or seen["--dry-run"]
+    if not tokens or tokens[0] not in ("deploy", "verify"):
+        print(
+            "Usage: aella_cli lab agent deploy [--dry-run]\n"
+            "       aella_cli lab agent verify [--json] [--dry-run]",
+            file=sys.stderr,
+        )
+        return 2
+    sub = tokens[0]
+    rest = tokens[1:]
+    if sub == "deploy":
+        if rest:
+            print(f"Unexpected arguments: {' '.join(rest)}", file=sys.stderr)
+            return 2
+        return _lab_invoke_script_caldera_dry(["scenario", "agent", "deploy"], dry_run=dry_run)
+    json_only = False
+    for t in rest:
+        if t == "--json":
+            json_only = True
+        else:
+            print(f"Unexpected argument: {t!r}", file=sys.stderr)
+            return 2
+    cmd = ["scenario", "agent", "verify"]
+    if json_only:
+        cmd.append("--json")
+    return _lab_invoke_script_caldera_dry(cmd, dry_run=dry_run)
+
+
+@log_command
+def lab_debug_callback(argv: List[str], *, dry_run: bool) -> int:
+    tokens, seen = _strip_flags(list(argv), ("--dry-run",))
+    dry_run = dry_run or seen["--dry-run"]
+    if tokens != ["paths"]:
+        print("Usage: aella_cli lab debug paths [--dry-run]", file=sys.stderr)
+        return 2
+    active_script = LAB_MANAGER
+    active_runtime = _XDR_BASE
+    active_config = LAB_CONFIG
+    active_state = active_runtime / "runtime" / "state"
+    source_root = _REPO_ROOT
+    print(f"active_script_path={active_script}")
+    print(f"active_runtime_path={active_runtime}")
+    print(f"active_config_path={active_config}")
+    print(f"active_state_path={active_state}")
+    print(f"source_dev_path={source_root}")
+    print("runtime_prod_path=/opt/xdr-lab")
+    mismatch = bool(
+        active_script.is_relative_to(source_root)
+        or active_config.is_relative_to(source_root)
+        or active_runtime == source_root
+    )
+    print(f"source_runtime_mismatch={'true' if mismatch else 'false'}")
+    if dry_run:
+        print("dry_run=true")
+    return 0
 
 
 @log_command
@@ -667,7 +844,7 @@ def lab_scenario_callback(argv: List[str], *, dry_run: bool) -> int:
             "       aella_cli lab scenario stop [--dry-run]\n"
             "       aella_cli lab scenario status [--human] [--dry-run]\n"
             "       aella_cli lab scenario telemetry <NAME|last|verify> [--json] [--dry-run]\n"
-            "       aella_cli lab scenario agent status [--json] [--dry-run]\n"
+            "       aella_cli lab scenario agent status|verify [--json] [--dry-run]\n"
             "       aella_cli lab scenario agent deploy [--dry-run]\n"
             "       aella_cli lab scenario agent remove [--dry-run]",
             file=sys.stderr,
@@ -807,7 +984,7 @@ def lab_scenario_callback(argv: List[str], *, dry_run: bool) -> int:
     if head == "agent":
         if not rest:
             print(
-                "Usage: aella_cli lab scenario agent status [--json] [--dry-run]\n"
+                "Usage: aella_cli lab scenario agent status|verify [--json] [--dry-run]\n"
                 "       aella_cli lab scenario agent deploy [--dry-run]\n"
                 "       aella_cli lab scenario agent remove [--dry-run]",
                 file=sys.stderr,
@@ -817,14 +994,14 @@ def lab_scenario_callback(argv: List[str], *, dry_run: bool) -> int:
         tail = rest[1:]
         tail_flags, seen_agent = _strip_flags(list(tail), ("--dry-run",))
         dry_agent = dry_run or seen_agent["--dry-run"]
-        if sub not in ("status", "deploy", "remove"):
+        if sub not in ("status", "verify", "deploy", "remove"):
             print(f"Unknown lab scenario agent subcommand: {sub!r}", file=sys.stderr)
             return 2
-        if sub == "status":
+        if sub in ("status", "verify"):
             if tail_flags not in ([], ["--json"]):
                 print(f"Unexpected arguments: {' '.join(tail_flags)}", file=sys.stderr)
                 return 2
-            cmd = ["scenario", "agent", "status", *tail_flags]
+            cmd = ["scenario", "agent", sub, *tail_flags]
             return _lab_invoke_script_caldera_dry(cmd, dry_run=dry_agent)
         if sub == "deploy":
             if tail_flags not in ([], ["--dry-run"]):
@@ -911,6 +1088,10 @@ def do_lab(argv: List[str]) -> int:
         "scenario": lab_scenario_callback,
         "runtime": lab_runtime_callback,
         "images": lab_images_callback,
+        "caldera": lab_caldera_callback,
+        "vm": lab_vm_callback,
+        "agent": lab_agent_callback,
+        "debug": lab_debug_callback,
     }
     fn_multi = lab_multi.get(head)
     if fn_multi is not None:

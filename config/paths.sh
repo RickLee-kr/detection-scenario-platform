@@ -11,7 +11,10 @@
 # against a non-canonical checkout location.
 
 # --- Project root (override via XDR_LAB_PROJECT_ROOT if needed) -------
-: "${XDR_LAB_PROJECT_ROOT:=/home/aella/xdr-lab-appliance}"
+if [[ -z "${XDR_LAB_PROJECT_ROOT:-}" ]]; then
+  _XDR_PATHS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  XDR_LAB_PROJECT_ROOT="$(cd "${_XDR_PATHS_DIR}/.." && pwd)"
+fi
 PROJECT_ROOT="${XDR_LAB_PROJECT_ROOT}"
 
 # --- Repository sub-directories --------------------------------------
