@@ -309,6 +309,9 @@ def log_jsonl(
     for k in sorted(norm.keys()):
         rec[k] = norm[k]
     line = json.dumps(rec, ensure_ascii=False) + "\n"
+    if dry_run():
+        print(line, end="", file=sys.stderr)
+        return
     if not log_path:
         print(line, end="", file=sys.stderr)
         return
@@ -340,6 +343,8 @@ _STATE_JSON_WARNED = False
 
 def save_json_atomic(path: Path, data: Mapping[str, Any]) -> None:
     global _STATE_JSON_WARNED
+    if dry_run():
+        return
     path.parent.mkdir(parents=True, exist_ok=True)
     doc = json.loads(json.dumps(dict(data), ensure_ascii=False))
     normalize_timestamp_values_inplace(doc)
@@ -2126,47 +2131,59 @@ def collect_scenario_run_preflight(
     for vm in target_vms:
         vm = str(vm).strip()
         if vm and not matrix.get(vm):
-            add_warn(
+            add_live_gate(
                 f"target_agent_missing:{vm}",
                 f"Target VM {vm!r} is in scenario targets but missing from the CALDERA agent matrix.",
             )
 
     if art_last is None or not isinstance(art_last, dict):
-        add_warn(
-            "atomic_validate_never",
-            "No `scenario atomic validate` record (caldera.json::atomic_red_team_validate_last).",
-        )
+        if atomic_in_plugins:
+            add_live_gate(
+                "atomic_validate_never",
+                "No `scenario atomic validate` record (caldera.json::atomic_red_team_validate_last).",
+            )
+        else:
+            add_warn(
+                "atomic_validate_never",
+                "No `scenario atomic validate` record (caldera.json::atomic_red_team_validate_last).",
+            )
     elif art_ok is False:
-        add_warn(
-            "atomic_validate_failed",
-            f"Last atomic validate recorded as failed (utc={art_utc or '?'}): {art_summary or 'no summary'}",
-        )
+        if atomic_in_plugins:
+            add_live_gate(
+                "atomic_validate_failed",
+                f"Last atomic validate recorded as failed (utc={art_utc or '?'}): {art_summary or 'no summary'}",
+            )
+        else:
+            add_warn(
+                "atomic_validate_failed",
+                f"Last atomic validate recorded as failed (utc={art_utc or '?'}): {art_summary or 'no summary'}",
+            )
 
     if not nat_global_ok:
         for n in nat_global_notes:
-            add_warn("nat_global", n)
+            add_live_gate("nat_global", n)
 
     for row in vm_reach:
         if not row.get("libvirt_running"):
-            add_warn(
+            add_live_gate(
                 f"vm_down:{row.get('vm')}",
                 f"{row.get('vm')}: not libvirt running ({row.get('libvirt_state')}).",
             )
         elif not row.get("reachable"):
-            add_warn(
+            add_live_gate(
                 f"vm_unreachable:{row.get('vm')}",
                 f"{row.get('vm')}: SSH/RDP/WinRM reachability failed — {row.get('detail')}",
             )
         for m in row.get("nat_vm_messages") or []:
-            add_warn(f"nat_vm:{row.get('vm')}", str(m))
+            add_live_gate(f"nat_vm:{row.get('vm')}", str(m))
 
     if not mirror_file:
-        add_warn(
+        add_live_gate(
             "mirror_json_missing",
             "runtime/state/mirror.json missing — run `xdr-lab-vm-manager.sh mirror status` / refresh first.",
         )
     elif not mirror_consistent:
-        add_warn(
+        add_live_gate(
             "mirror_inconsistent",
             "mirror.json consistent=false — OVS mirror may not match intent (`lab mirror verify`).",
         )
@@ -4078,6 +4095,13 @@ def _print_scenario_status_human(
         print(f"  - {line}")
 
 
+def stellar_sensor_artifacts_present(xdr_root: Path) -> bool:
+    sensor_dir = xdr_root / "images" / "sensor"
+    return (sensor_dir / "virt_deploy_modular_ds.sh").is_file() and (
+        sensor_dir / "sensor-base.qcow2"
+    ).is_file()
+
+
 def cmd_run(
     xdr_root: Path,
     stated: Path,
@@ -4371,6 +4395,11 @@ def cmd_run(
             snapshot_before=snapshot_before,
             preflight_warnings=len(warns_raw),
         )
+    ready_for_generic = not blocks_raw and not gate_raw
+    ready_for_stellar = ready_for_generic and stellar_sensor_artifacts_present(xdr_root)
+    print(f"READY_FOR_GENERIC_LAB_SCENARIO={'true' if ready_for_generic else 'false'}")
+    print(f"READY_FOR_STELLAR_SENSOR_SCENARIO={'true' if ready_for_stellar else 'false'}")
+    print(f"READY_FOR_LIVE_SCENARIO={'true' if ready_for_stellar else 'false'}")
 
     if not is_dry:
         print_scenario_run_preflight_stdout(
@@ -5379,6 +5408,35 @@ def cmd_agent_status(
     return 0
 
 
+def cmd_agent_verify(
+    cfg: dict[str, Any], stated: Path, log_path: Path | None, *, json_only: bool
+) -> int:
+    xdr_root = Path(stated.parent.parent)
+    scenario_doc, caldera_doc = refresh_state(xdr_root, stated, cfg, log_path=log_path)
+    matrix = caldera_doc.get("agent_matrix_last")
+    if not isinstance(matrix, dict):
+        matrix = scenario_doc.get("agents") if isinstance(scenario_doc.get("agents"), dict) else {}
+    roles = agent_vm_roles(cfg)
+    disconnected = [vm for vm in roles if not bool(matrix.get(vm))]
+    payload = {
+        "result": "PASS" if not disconnected else "FAIL",
+        "roles": roles,
+        "connected": [vm for vm in roles if bool(matrix.get(vm))],
+        "disconnected": disconnected,
+        "matrix": {vm: bool(matrix.get(vm)) for vm in roles},
+    }
+    scenario_doc["agents"] = payload["matrix"]
+    save_json_atomic(stated / "scenario.json", scenario_doc)
+    if json_only:
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        print("=== CALDERA lab — agent verify ===")
+        for vm in roles:
+            print(f"[{'PASS' if bool(matrix.get(vm)) else 'FAIL'}] {vm}")
+        print(f"RESULT: {payload['result']}")
+    return 0 if not disconnected else 1
+
+
 def cmd_agent_deploy(
     xdr_root: Path,
     cfg: dict[str, Any],
@@ -5449,11 +5507,16 @@ def cmd_agent_deploy(
                 )
             return exit_final
 
-    write_agent_bootstraps(xdr_root, base_url, log_path)
     sh_path = xdr_root / "runtime" / "caldera-agent" / "bootstrap-linux.sh"
     ps1_path = xdr_root / "runtime" / "caldera-agent" / "bootstrap-windows.ps1"
-    linux_body = sh_path.read_text(encoding="utf-8") if sh_path.is_file() else ""
-    ps1_body = ps1_path.read_text(encoding="utf-8") if ps1_path.is_file() else ""
+    if is_dry:
+        print("[dry-run] runtime/caldera-agent bootstrap files are not written.")
+        linux_body = ""
+        ps1_body = ""
+    else:
+        write_agent_bootstraps(xdr_root, base_url, log_path)
+        linux_body = sh_path.read_text(encoding="utf-8") if sh_path.is_file() else ""
+        ps1_body = ps1_path.read_text(encoding="utf-8") if ps1_path.is_file() else ""
 
     nat_ok, nat_notes = nat_reverse_happy(nat_doc)
     if not nat_ok:
@@ -7683,6 +7746,8 @@ def build_parser() -> argparse.ArgumentParser:
     pas = pag.add_subparsers(dest="agent_cmd", required=True)
     pstat = pas.add_parser("status", help="Show CALDERA agent matrix (human-friendly; use --json for legacy)")
     pstat.add_argument("--json", action="store_true", help="Emit scenario agents JSON only")
+    pver = pas.add_parser("verify", help="Verify every configured lab role has a visible Sandcat agent")
+    pver.add_argument("--json", action="store_true", help="Emit verification JSON")
     pade = pas.add_parser("deploy", help="Write bootstrap scripts and deploy to lab VMs (SSH / Windows paths)")
     pade.add_argument(
         "--dry-run",
@@ -7804,6 +7869,10 @@ def main(argv: list[str] | None = None) -> int:
         ac = args.agent_cmd
         if ac == "status":
             return cmd_agent_status(
+                cfg, stated, log_path, json_only=bool(getattr(args, "json", False))
+            )
+        if ac == "verify":
+            return cmd_agent_verify(
                 cfg, stated, log_path, json_only=bool(getattr(args, "json", False))
             )
         if ac == "deploy":

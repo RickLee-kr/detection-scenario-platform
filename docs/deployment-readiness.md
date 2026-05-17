@@ -149,7 +149,47 @@ High-level view (same story as `README.md` §2):
 
 ---
 
-## 8. Related documents
+## 8. Stellar Sensor Artifact Readiness
+
+The lab supports two distinct readiness levels:
+
+- `READY_FOR_GENERIC_LAB_SCENARIO`: infrastructure, NAT, OVS mirror, CALDERA,
+  and console paths are ready for generic lab VMs.
+- `READY_FOR_STELLAR_SENSOR_SCENARIO`: generic readiness plus real Stellar
+  Sensor artifacts are present.
+
+An Ubuntu cloud image booted as `sensor-vm` is reported as
+`sensor_type=generic_linux`. It is valid for generic lab infrastructure checks,
+but it is not a real Stellar Sensor. A Stellar-backed run requires both files in
+the sensor cache:
+
+```text
+/opt/xdr-lab/images/sensor/virt_deploy_modular_ds.sh
+/opt/xdr-lab/images/sensor/sensor-base.qcow2
+```
+
+If these files are missing, validators print:
+
+```text
+stellar_sensor_artifact_found=false
+stellar_sensor_ready=false
+READY_FOR_STELLAR_SENSOR_SCENARIO=false
+```
+
+Install upstream artifacts explicitly:
+
+```bash
+sudo install -D -m 0755 <artifact>/virt_deploy_modular_ds.sh /opt/xdr-lab/images/sensor/virt_deploy_modular_ds.sh
+sudo install -D -m 0644 <artifact>/sensor-base.qcow2 /opt/xdr-lab/images/sensor/sensor-base.qcow2
+```
+
+Placeholder URLs such as `REPLACE_ME.example.invalid` are configuration errors.
+Download commands must stop with `CONFIG_PLACEHOLDER_ERROR` instead of trying to
+fetch them.
+
+---
+
+## 9. Related documents
 
 - First-time verification: `docs/environment-sanity-checklist.md`
 - Real hardware / nested bring-up: `docs/real-environment-bringup.md`

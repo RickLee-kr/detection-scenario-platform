@@ -168,6 +168,41 @@ compute_overall() {
   fi
 }
 
+failure_class() {
+  local i status id rc first=""
+  for i in "${!COMPONENTS[@]}"; do
+    status="${COMPONENT_STATUS[$i]}"
+    [[ "${status}" == "FAIL" ]] || continue
+    id="${COMPONENTS[$i]}"
+    rc="${COMPONENT_RCS[$i]}"
+    case "${id}:${rc}" in
+      host_network:${RV_EXIT_PRIVILEGE_SKIP}|libvirt:${RV_EXIT_PRIVILEGE_SKIP}|ovs_mirror:${RV_EXIT_PRIVILEGE_SKIP})
+        echo "${id}_privilege"
+        return 0
+        ;;
+      caldera:35) echo "caldera_api_not_authenticated"; return 0 ;;
+      caldera:30|caldera:40) echo "caldera_unreachable"; return 0 ;;
+      caldera:5|caldera:6|caldera:7|caldera:8|caldera:10|caldera:15|caldera:20)
+        echo "caldera_runtime"
+        return 0
+        ;;
+      libvirt:*) echo "libvirt_runtime"; return 0 ;;
+      sensor_identity:*) echo "sensor_identity"; return 0 ;;
+      ovs_mirror:*) echo "ovs_mirror"; return 0 ;;
+      web_console:*) echo "web_console"; return 0 ;;
+      host_network:*) echo "host_network"; return 0 ;;
+    esac
+    [[ -z "${first}" ]] && first="${id}"
+  done
+  if [[ -n "${first}" ]]; then
+    echo "${first}"
+  elif [[ "${OVERALL_RESULT}" == "WARN" ]]; then
+    echo "warning"
+  else
+    echo "ok"
+  fi
+}
+
 readiness_label() {
   local id="$1" status="$2"
   case "${id}:${status}" in
@@ -180,6 +215,9 @@ readiness_label() {
     libvirt:PASS) echo "READY" ;;
     libvirt:SKIP|libvirt:WARN) echo "NOT VALIDATED" ;;
     libvirt:*) echo "NOT READY" ;;
+    sensor_identity:PASS) echo "READY" ;;
+    sensor_identity:SKIP|sensor_identity:WARN) echo "NOT VALIDATED" ;;
+    sensor_identity:*) echo "NOT READY" ;;
     ovs_mirror:PASS) echo "READY" ;;
     ovs_mirror:SKIP|ovs_mirror:WARN) echo "NOT VALIDATED" ;;
     ovs_mirror:*) echo "NOT READY" ;;
@@ -256,10 +294,27 @@ run_component host_network validate-host-network.sh 1
 wait_for_caldera_if_requested
 run_component caldera validate-caldera.sh 1
 run_component libvirt validate-libvirt.sh 0
+run_component sensor_identity validate-sensor-identity.sh 0
 run_component ovs_mirror validate-ovs-mirror.sh 0
 run_component web_console validate-web-console.sh 0
 
 compute_overall
+FAILURE_CLASS="$(failure_class)"
+READY_FOR_GENERIC_LAB_SCENARIO="false"
+READY_FOR_STELLAR_SENSOR_SCENARIO="false"
+if [[ "$(component_status_by_id host_network)" == "PASS" \
+    && "$(component_status_by_id caldera)" == "PASS" \
+    && "$(component_status_by_id libvirt)" == "PASS" \
+    && "$(component_status_by_id ovs_mirror)" == "PASS" \
+    && "$(component_status_by_id web_console)" == "PASS" ]]; then
+  READY_FOR_GENERIC_LAB_SCENARIO="true"
+fi
+if [[ "${READY_FOR_GENERIC_LAB_SCENARIO}" == "true" \
+    && "$(component_status_by_id sensor_identity)" == "PASS" ]]; then
+  READY_FOR_STELLAR_SENSOR_SCENARIO="true"
+fi
+# Backwards-compatible legacy field: live scenario now means Stellar-backed live scenario.
+READY_FOR_LIVE_SCENARIO="${READY_FOR_STELLAR_SENSOR_SCENARIO}"
 
 if [[ "${JSON_MODE}" -eq 1 ]]; then
   json_data_file="$(mktemp)"
@@ -272,7 +327,8 @@ if [[ "${JSON_MODE}" -eq 1 ]]; then
     printf -- '---\n'
     printf '%s\n' "${COMPONENT_STATUS[@]}"
   } >"${json_data_file}"
-  python3 - "${OVERALL_RESULT}" "$(mode_label)" "${json_data_file}" <<'PY'
+  python3 - "${OVERALL_RESULT}" "$(mode_label)" "${json_data_file}" "${FAILURE_CLASS}" \
+    "${READY_FOR_GENERIC_LAB_SCENARIO}" "${READY_FOR_STELLAR_SENSOR_SCENARIO}" <<'PY'
 import json, sys
 overall = sys.argv[1]
 mode = sys.argv[2]
@@ -297,6 +353,10 @@ for name, comp_rc, required, status in zip(names, rcs, req, statuses):
 print(json.dumps({
     "result": overall,
     "mode": mode,
+    "failure_class": sys.argv[4] if len(sys.argv) > 4 else "unknown",
+    "READY_FOR_GENERIC_LAB_SCENARIO": sys.argv[5] == "true",
+    "READY_FOR_STELLAR_SENSOR_SCENARIO": sys.argv[6] == "true",
+    "READY_FOR_LIVE_SCENARIO": sys.argv[6] == "true",
     "components": components,
 }, indent=2, sort_keys=True))
 PY
@@ -318,11 +378,16 @@ else
   echo "- CALDERA: $(readiness_label caldera "$(component_status_by_id caldera)")"
   echo "- Runtime persistence: $(readiness_label host_network "$(component_status_by_id host_network)")"
   echo "- Attack orchestration: $(readiness_label caldera "$(component_status_by_id caldera)")"
+  echo "- Sensor identity: $(readiness_label sensor_identity "$(component_status_by_id sensor_identity)")"
   echo "- OVS mirror telemetry: $(readiness_label ovs_mirror "$(component_status_by_id ovs_mirror)")"
   echo "- Windows web console: $(readiness_label web_console "$(component_status_by_id web_console)")"
   echo
   echo "RESULT: ${OVERALL_RESULT}"
+  echo "READY_FOR_GENERIC_LAB_SCENARIO=${READY_FOR_GENERIC_LAB_SCENARIO}"
+  echo "READY_FOR_STELLAR_SENSOR_SCENARIO=${READY_FOR_STELLAR_SENSOR_SCENARIO}"
+  echo "READY_FOR_LIVE_SCENARIO=${READY_FOR_LIVE_SCENARIO}"
+  echo "FAILURE_CLASS=${FAILURE_CLASS}"
 fi
 
-rv_log INFO "validate-appliance finished result=${OVERALL_RESULT} exit=${OVERALL_RC}"
+rv_log INFO "validate-appliance finished result=${OVERALL_RESULT} ready_for_generic_lab_scenario=${READY_FOR_GENERIC_LAB_SCENARIO} ready_for_stellar_sensor_scenario=${READY_FOR_STELLAR_SENSOR_SCENARIO} failure_class=${FAILURE_CLASS} exit=${OVERALL_RC}"
 exit "${OVERALL_RC}"

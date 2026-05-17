@@ -53,6 +53,30 @@ recovery require a sensor redeploy, which is unacceptable.
 `deploy_sensor_vm` requires both to exist; missing the script →
 `die "Sensor deploy script missing: … (run download first)"`.
 
+Placeholder URLs (`REPLACE_ME.example.invalid`, `REPLACE_ME`, or other
+placeholder markers) are configuration errors. Download paths MUST stop with
+`CONFIG_PLACEHOLDER_ERROR` instead of attempting network access.
+
+When upstream Stellar Sensor artifacts are absent, report the mode explicitly:
+
+- `sensor_type=generic_linux`
+- `stellar_sensor_artifact_found=false`
+- `stellar_sensor_ready=false`
+
+The required upstream artifacts are:
+
+```text
+/opt/xdr-lab/images/sensor/virt_deploy_modular_ds.sh
+/opt/xdr-lab/images/sensor/sensor-base.qcow2
+```
+
+Operator remediation:
+
+```bash
+sudo install -D -m 0755 <artifact>/virt_deploy_modular_ds.sh /opt/xdr-lab/images/sensor/virt_deploy_modular_ds.sh
+sudo install -D -m 0644 <artifact>/sensor-base.qcow2 /opt/xdr-lab/images/sensor/sensor-base.qcow2
+```
+
 ## Post-deploy validation
 
 `validate_sensor_deployment` is observability, not gating:

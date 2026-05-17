@@ -57,6 +57,16 @@ def load_state(path: Path) -> dict[str, Any]:
         return {"schema_version": 1, "images": {}}
 
 
+def is_placeholder_url(url: str) -> bool:
+    lowered = url.lower()
+    return (
+        not url
+        or "replace_me.example.invalid" in lowered
+        or "replace_me" in lowered
+        or "placeholder" in lowered
+    )
+
+
 def save_state(path: Path, state: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     state["updated_utc"] = utc_now()
@@ -287,6 +297,21 @@ def cmd_download(args: argparse.Namespace) -> int:
         if dry_run:
             print(f"DRY-RUN: {msg}", file=sys.stdout)
             return 0
+        print(f"ERROR: {msg}", file=sys.stderr)
+        return 2
+
+    placeholder_images = [
+        str(im.get("name", "") or "?")
+        for im in selected
+        if is_placeholder_url(str(im.get("url", "")))
+    ]
+    if placeholder_images:
+        msg = (
+            "CONFIG_PLACEHOLDER_ERROR: refusing to download placeholder artifact URLs "
+            f"for select={select!r}: {', '.join(placeholder_images)}. "
+            "Replace config/images-manifest.json URLs with real artifacts or install them manually."
+        )
+        log_jsonl(log_path, "image_download_failed", reason=msg)
         print(f"ERROR: {msg}", file=sys.stderr)
         return 2
 

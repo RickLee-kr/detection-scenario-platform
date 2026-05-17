@@ -12,9 +12,15 @@
 set -euo pipefail
 
 _XDR_VM_MGR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -f "${_XDR_VM_MGR_DIR}/../config/paths.sh" ]]; then
+: "${XDR_BASE:=/opt/xdr-lab}"
+: "${XDR_ROOT:=${XDR_BASE}}"
+: "${XDR_LAB_DEV_MODE:=0}"
+if [[ "${XDR_LAB_DEV_MODE}" == "1" && -f "${_XDR_VM_MGR_DIR}/../config/paths.sh" ]]; then
   # shellcheck source=../config/paths.sh
   . "${_XDR_VM_MGR_DIR}/../config/paths.sh"
+elif [[ -f "${XDR_ROOT}/config/paths.sh" ]]; then
+  # shellcheck source=/dev/null
+  . "${XDR_ROOT}/config/paths.sh"
 elif [[ -n "${XDR_BASE:-}" && -f "${XDR_BASE}/config/paths.sh" ]]; then
   # shellcheck source=/dev/null
   . "${XDR_BASE}/config/paths.sh"
@@ -37,37 +43,23 @@ readonly RUN="${XDR_RUNTIME_DIR}"
 readonly STATED="${XDR_RUNTIME_STATE_DIR}"
 readonly LOGD="${XDR_LOGS_DIR}"
 readonly SCRIPTS="${XDR_SCRIPTS_DIR}"
-if [[ -f "${_XDR_VM_MGR_DIR}/vm_runtime_state.py" ]]; then
-  readonly STATE_HELPER="${_XDR_VM_MGR_DIR}/vm_runtime_state.py"
-else
-  readonly STATE_HELPER="${SCRIPTS}/vm_runtime_state.py"
-fi
-if [[ -f "${_XDR_VM_MGR_DIR}/ovs_mirror_state.py" ]]; then
-  readonly MIRROR_HELPER="${_XDR_VM_MGR_DIR}/ovs_mirror_state.py"
-else
-  readonly MIRROR_HELPER="${SCRIPTS}/ovs_mirror_state.py"
-fi
-if [[ -f "${_XDR_VM_MGR_DIR}/nat_state.py" ]]; then
-  readonly NAT_HELPER="${_XDR_VM_MGR_DIR}/nat_state.py"
-else
-  readonly NAT_HELPER="${SCRIPTS}/nat_state.py"
-fi
-if [[ -f "${_XDR_VM_MGR_DIR}/snapshot_state.py" ]]; then
-  readonly SNAPSHOT_HELPER="${_XDR_VM_MGR_DIR}/snapshot_state.py"
-else
-  readonly SNAPSHOT_HELPER="${SCRIPTS}/snapshot_state.py"
-fi
-if [[ -f "${_XDR_VM_MGR_DIR}/image_download_manager.py" ]]; then
-  readonly IMAGE_DL_HELPER="${_XDR_VM_MGR_DIR}/image_download_manager.py"
-else
-  readonly IMAGE_DL_HELPER="${SCRIPTS}/image_download_manager.py"
-fi
-if [[ -f "${_XDR_VM_MGR_DIR}/caldera_orchestration.py" ]]; then
-  readonly CALDERA_HELPER="${_XDR_VM_MGR_DIR}/caldera_orchestration.py"
-else
-  readonly CALDERA_HELPER="${SCRIPTS}/caldera_orchestration.py"
-fi
-if [[ -f "${_XDR_VM_MGR_DIR}/windows_lab_helpers.sh" ]]; then
+
+_xdr_helper_path() {
+  local name="$1"
+  if [[ "${XDR_LAB_DEV_MODE}" == "1" && -f "${_XDR_VM_MGR_DIR}/${name}" ]]; then
+    echo "${_XDR_VM_MGR_DIR}/${name}"
+  else
+    echo "${SCRIPTS}/${name}"
+  fi
+}
+
+readonly STATE_HELPER="$(_xdr_helper_path vm_runtime_state.py)"
+readonly MIRROR_HELPER="$(_xdr_helper_path ovs_mirror_state.py)"
+readonly NAT_HELPER="$(_xdr_helper_path nat_state.py)"
+readonly SNAPSHOT_HELPER="$(_xdr_helper_path snapshot_state.py)"
+readonly IMAGE_DL_HELPER="$(_xdr_helper_path image_download_manager.py)"
+readonly CALDERA_HELPER="$(_xdr_helper_path caldera_orchestration.py)"
+if [[ "${XDR_LAB_DEV_MODE}" == "1" && -f "${_XDR_VM_MGR_DIR}/windows_lab_helpers.sh" ]]; then
   # shellcheck source=windows_lab_helpers.sh
   . "${_XDR_VM_MGR_DIR}/windows_lab_helpers.sh"
 elif [[ -f "${SCRIPTS}/windows_lab_helpers.sh" ]]; then
@@ -192,6 +184,9 @@ fi
 _invoke_state_refresh() {
   local vm="$1"
   local touch_deploy="${2:-0}"
+  if dry_run_active; then
+    return 0
+  fi
   if [[ ! -f "${STATE_HELPER}" ]]; then
     log_structured "WARN" "state_helper_missing path=${STATE_HELPER}"
     return 0
@@ -829,7 +824,7 @@ die() {
 
 _known_cli_actions=(
   download deploy start stop destroy status validate access cleanup
-  snapshot scenario runtime mirror nat vnc-proxy web-console windows-console images
+  snapshot scenario runtime mirror nat vnc-proxy web-console windows-console images vm
 )
 
 is_known_cli_action() {
@@ -844,6 +839,9 @@ is_known_cli_action() {
 needs_runtime_environment() {
   local action="$1"
   shift || true
+  if dry_run_active; then
+    return 1
+  fi
   case "$action" in
     status|access)
       return 1
@@ -1026,6 +1024,9 @@ PY
 
 download_to() {
   local url="$1" dest="$2"
+  if config_url_is_placeholder "${url}"; then
+    die "CONFIG_PLACEHOLDER_ERROR: refusing to download placeholder URL: ${url}. Replace config/lab-vms.json or config/images-manifest.json with real artifact URLs, or install artifacts manually."
+  fi
   mkdir -p "$(dirname "$dest")"
   if command -v curl >/dev/null 2>&1; then
     curl -fL --retry 3 --retry-delay 2 -o "$dest" "$url"
@@ -1034,6 +1035,12 @@ download_to() {
   else
     die "Neither curl nor wget is available for downloads"
   fi
+}
+
+config_url_is_placeholder() {
+  local url="${1:-}" lowered
+  lowered="$(printf '%s' "${url}" | tr '[:upper:]' '[:lower:]')"
+  [[ -z "${url}" || "${lowered}" == *"replace_me.example.invalid"* || "${lowered}" == *"replace_me"* || "${lowered}" == *"placeholder"* ]]
 }
 
 # -----------------------------------------------------------------------------
@@ -1071,6 +1078,9 @@ image_manifest_sync() {
   local select="${1:-MANIFEST_ALL}"
   manifest_enabled || return 0
   require_cmd python3
+  if manifest_selection_has_placeholder_url "${select}"; then
+    die "CONFIG_PLACEHOLDER_ERROR: refusing manifest download because ${XDR_LAB_IMAGES_MANIFEST} contains REPLACE_ME.example.invalid placeholder URLs for select=${select}. Replace URLs or install artifacts manually."
+  fi
   local pre=( )
   local post=( )
   if dry_run_active; then
@@ -1086,6 +1096,26 @@ image_manifest_sync() {
     --log-file "${LOGD}/vm-manager.log" \
     "${pre[@]}" \
     download --select "${select}" "${post[@]}"
+}
+
+manifest_selection_has_placeholder_url() {
+  local select="${1:-MANIFEST_ALL}"
+  python3 - "${XDR_LAB_IMAGES_MANIFEST}" "${select}" <<'PY'
+import json, sys
+path, select = sys.argv[1], sys.argv[2]
+with open(path, encoding="utf-8") as fh:
+    data = json.load(fh)
+for image in data.get("images", []):
+    if not isinstance(image, dict):
+        continue
+    if select != "MANIFEST_ALL" and select not in {str(image.get("name", "")), str(image.get("vm_role", ""))}:
+        continue
+    url = str(image.get("url", ""))
+    lowered = url.lower()
+    if (not url) or "replace_me.example.invalid" in lowered or "replace_me" in lowered or "placeholder" in lowered:
+        sys.exit(0)
+sys.exit(1)
+PY
 }
 
 # shellcheck disable=SC2090,SC3040
@@ -1287,6 +1317,163 @@ windows_probe_core_ok() {
   return 0
 }
 
+windows_nvram_preflight() {
+  local vm="$1" nvram="$2" holder=""
+  [[ -n "${nvram}" ]] || return 0
+  if command -v virsh >/dev/null 2>&1; then
+    while IFS= read -r dom; do
+      [[ -n "${dom}" && "${dom}" != "${vm}" ]] || continue
+      if virsh dumpxml "${dom}" 2>/dev/null | grep -Fq "${nvram}"; then
+        holder="${dom}"
+        break
+      fi
+    done < <(virsh list --all --name 2>/dev/null || true)
+  fi
+  if [[ -n "${holder}" ]]; then
+    die "nvram_locked vm=${vm} path=${nvram} holder_domain=${holder}"
+  fi
+  if [[ -f "${nvram}" ]] && command -v fuser >/dev/null 2>&1; then
+    if fuser "${nvram}" >/dev/null 2>&1; then
+      die "nvram_locked vm=${vm} path=${nvram} holder_process=fuser"
+    fi
+  fi
+}
+
+windows_nvram_path() {
+  local vm="$1"
+  printf '%s/%s/nvram/OVMF_VARS.fd' "${RUN}" "${vm}"
+}
+
+windows_runtime_disk_path() {
+  local vm="$1"
+  printf '%s/%s/root.qcow2' "${RUN}" "${vm}"
+}
+
+windows_qemu_dac_owner() {
+  local disk="$1" nvram="$2" user="" group=""
+  if [[ -e "${disk}" ]]; then
+    stat -c '%U:%G' "${disk}" 2>/dev/null && return 0
+  fi
+  if [[ -e "${nvram}" ]]; then
+    stat -c '%U:%G' "${nvram}" 2>/dev/null && return 0
+  fi
+  if id -u libvirt-qemu >/dev/null 2>&1; then
+    user="libvirt-qemu"
+    group="kvm"
+  elif id -u qemu >/dev/null 2>&1; then
+    user="qemu"
+    group="qemu"
+  fi
+  if [[ -n "${user}" ]]; then
+    getent group "${group}" >/dev/null 2>&1 || group="${user}"
+    printf '%s:%s\n' "${user}" "${group}"
+  fi
+}
+
+windows_repair_nvram_permissions() {
+  local vm="$1" nvram="$2" disk="$3" owner run_vm
+  run_vm="${RUN}/${vm}"
+  mkdir -p "$(dirname "${nvram}")"
+  chmod 0755 "${run_vm}" "$(dirname "${nvram}")" 2>/dev/null || true
+  if [[ -f "${nvram}" ]]; then
+    chmod u+rw,g+rw,o+r "${nvram}" 2>/dev/null || chmod 0664 "${nvram}" 2>/dev/null || true
+  fi
+  if [[ -f "${disk}" ]]; then
+    chmod u+rw,g+rw,o-rwx "${disk}" 2>/dev/null || true
+  fi
+  owner="$(windows_qemu_dac_owner "${disk}" "${nvram}" || true)"
+  if [[ -n "${owner}" ]]; then
+    if [[ "$(id -u)" -eq 0 ]]; then
+      [[ -f "${nvram}" ]] && chown "${owner}" "${nvram}" 2>/dev/null || true
+      [[ -f "${disk}" ]] && chown "${owner}" "${disk}" 2>/dev/null || true
+      log_structured "INFO" "windows_nvram_dac_repaired vm=${vm} owner=${owner} nvram=${nvram}"
+    elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+      [[ -f "${nvram}" ]] && sudo -n chown "${owner}" "${nvram}" 2>/dev/null || true
+      [[ -f "${disk}" ]] && sudo -n chown "${owner}" "${disk}" 2>/dev/null || true
+      log_structured "INFO" "windows_nvram_dac_repaired_sudo vm=${vm} owner=${owner} nvram=${nvram}"
+    else
+      log_structured "WARN" "windows_nvram_dac_repair_needs_root vm=${vm} owner=${owner} nvram=${nvram}"
+    fi
+  fi
+}
+
+windows_qemu_lock_pids() {
+  local vm="$1" nvram="$2" proc pid cmd fd target
+  for proc in /proc/[0-9]*; do
+    [[ -d "${proc}" ]] || continue
+    pid="${proc##*/}"
+    cmd="$(tr '\0' ' ' <"${proc}/cmdline" 2>/dev/null || true)"
+    [[ "${cmd}" == *qemu* ]] || continue
+    if [[ "${cmd}" == *"${nvram}"* || "${cmd}" == *"${vm}"* ]]; then
+      printf '%s\n' "${pid}"
+      continue
+    fi
+    for fd in "${proc}"/fd/*; do
+      target="$(readlink "${fd}" 2>/dev/null || true)"
+      if [[ "${target}" == "${nvram}" ]]; then
+        printf '%s\n' "${pid}"
+        break
+      fi
+    done
+  done | awk '!seen[$0]++'
+}
+
+windows_cleanup_stale_qemu_locks() {
+  local vm="$1" nvram="$2" state pids=() pid waited=0
+  state="$(virsh domstate "${vm}" 2>/dev/null | tr -d '\r' || true)"
+  if [[ "${state}" == "running" ]]; then
+    log_structured "INFO" "windows_stale_qemu_cleanup_skipped vm=${vm} reason=domain_running"
+    return 0
+  fi
+  mapfile -t pids < <(windows_qemu_lock_pids "${vm}" "${nvram}")
+  if [[ "${#pids[@]}" -eq 0 ]]; then
+    return 0
+  fi
+  log_structured "WARN" "windows_stale_qemu_cleanup_begin vm=${vm} pids=${pids[*]} nvram=${nvram}"
+  for pid in "${pids[@]}"; do
+    kill "${pid}" 2>/dev/null || true
+  done
+  while (( waited < 5 )); do
+    local alive=0
+    for pid in "${pids[@]}"; do
+      kill -0 "${pid}" 2>/dev/null && alive=1
+    done
+    [[ "${alive}" -eq 0 ]] && break
+    sleep 1
+    waited=$(( waited + 1 ))
+  done
+  for pid in "${pids[@]}"; do
+    kill -0 "${pid}" 2>/dev/null && kill -9 "${pid}" 2>/dev/null || true
+  done
+  rm -f "${nvram}.lock" "${nvram}.lck" 2>/dev/null || true
+  log_structured "WARN" "windows_stale_qemu_cleanup_end vm=${vm} pids=${pids[*]}"
+}
+
+repair_windows_vm_runtime() {
+  local vm="$1" nvram disk ovmf_vars_tpl
+  require_cmd virsh
+  if [[ "$(vm_json_field_optional "${vm}" type "")" != "windows" ]]; then
+    die "VM is not a Windows guest: ${vm}"
+  fi
+  nvram="$(windows_nvram_path "${vm}")"
+  disk="$(windows_runtime_disk_path "${vm}")"
+  if [[ ! -f "${nvram}" ]]; then
+    if declare -F xdr_find_ovmf_vars_template >/dev/null 2>&1; then
+      ovmf_vars_tpl="$(xdr_find_ovmf_vars_template || true)"
+      if [[ -n "${ovmf_vars_tpl}" && -f "${ovmf_vars_tpl}" ]]; then
+        mkdir -p "$(dirname "${nvram}")"
+        cp -f -- "${ovmf_vars_tpl}" "${nvram}"
+        log_structured "INFO" "windows_nvram_recreated vm=${vm} path=${nvram}"
+      fi
+    fi
+  fi
+  windows_cleanup_stale_qemu_locks "${vm}" "${nvram}"
+  windows_repair_nvram_permissions "${vm}" "${nvram}" "${disk}"
+  windows_nvram_preflight "${vm}" "${nvram}"
+  _invoke_state_refresh "${vm}" 0
+  log_structured "INFO" "windows_vm_repair_complete vm=${vm} nvram=${nvram}"
+}
+
 deploy_windows_vm() {
   local vm="$1"
   local nodownload="${2:-0}"
@@ -1362,6 +1549,7 @@ deploy_windows_vm() {
   else
     log_structured "INFO" "windows_nvram_reuse vm=${vm} path=${nvram}"
   fi
+  windows_nvram_preflight "$vm" "$nvram"
 
   local qcow_mode backing_fn golden_backing
   qcow_mode="$(vm_json_field_optional "$vm" windows_qcow2_mode "full-clone")"
@@ -2557,7 +2745,29 @@ start_vm() {
     die "VM not defined: $vm"
   fi
   log_structured "INFO" "start_vm vm=${vm}"
-  virsh start "$vm" || die "virsh start failed for $vm"
+  local errf rc vtype
+  errf="$(mktemp)"
+  set +e
+  virsh start "$vm" 2>"${errf}"
+  rc=$?
+  set -e
+  if [[ "${rc}" -ne 0 ]]; then
+    vtype="$(vm_json_field_optional "${vm}" type "")"
+    if [[ "${vtype}" == "windows" ]] && grep -qiE 'ovmf|nvram|pflash|already in use|lock' "${errf}" 2>/dev/null; then
+      log_structured "WARN" "windows_start_nvram_lock_detected vm=${vm} rc=${rc}"
+      repair_windows_vm_runtime "${vm}" || true
+      set +e
+      virsh start "$vm" 2>>"${errf}"
+      rc=$?
+      set -e
+    fi
+  fi
+  if [[ "${rc}" -ne 0 ]]; then
+    sed 's/^/virsh: /' "${errf}" >&2 || true
+    rm -f "${errf}"
+    die "virsh start failed for $vm"
+  fi
+  rm -f "${errf}"
   _invoke_state_refresh "$vm" 0
 }
 
@@ -2919,6 +3129,9 @@ snapshot_state_write() {
   else
     vcsv="$(_snapshot_vms_csv)"
   fi
+  if [[ "$dryf" == "1" || "$(dry_run_active && echo 1 || echo 0)" == "1" ]]; then
+    return 0
+  fi
   mkdir -p "$(dirname "${XDR_LAB_SNAPSHOTS_JSON}")"
   _snapshot_helper_ok || return 1
   if [[ "$dryf" == "1" ]]; then
@@ -3218,7 +3431,7 @@ _caldera_helper_ok() {
 }
 
 _caldera_key_resolver() {
-  if [[ -f "${_XDR_VM_MGR_DIR}/caldera_api_key_resolve.py" ]]; then
+  if [[ "${XDR_LAB_DEV_MODE}" == "1" && -f "${_XDR_VM_MGR_DIR}/caldera_api_key_resolve.py" ]]; then
     echo "${_XDR_VM_MGR_DIR}/caldera_api_key_resolve.py"
   elif [[ -f "${SCRIPTS}/caldera_api_key_resolve.py" ]]; then
     echo "${SCRIPTS}/caldera_api_key_resolve.py"
@@ -3575,6 +3788,18 @@ main() {
   if [[ "$action" == "mirror" ]]; then
     log_structured "INFO" "cli action=mirror sub=${target:-} sensor_vm=${extra:-${XDR_LAB_SENSOR_VM}}"
     mirror_dispatch "${target:-}" "${extra:-${XDR_LAB_SENSOR_VM}}"
+    exit $?
+  fi
+  if [[ "$action" == "vm" ]]; then
+    local vm_sub="${target:-}"
+    local vm_name="${extra:-}"
+    if [[ "${vm_sub}" != "repair" || -z "${vm_name}" ]]; then
+      echo "Usage: $(basename "$0") vm repair <vm>" >&2
+      exit 2
+    fi
+    log_structured "INFO" "cli action=vm sub=repair vm=${vm_name}"
+    repair_windows_vm_runtime "${vm_name}"
+    start_vm "${vm_name}"
     exit $?
   fi
   if [[ "$action" == "nat" ]]; then
