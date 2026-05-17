@@ -40,6 +40,12 @@ def _resolve_lab_config() -> Path:
     return _XDR_BASE / "config" / "lab-vms.json"
 
 
+def _resolve_caldera_config() -> Path:
+    if os.environ.get("XDR_LAB_CALDERA_CONFIG"):
+        return Path(os.environ["XDR_LAB_CALDERA_CONFIG"])
+    return _XDR_BASE / "config" / "caldera-lab.json"
+
+
 def _resolve_bootstrap_dir() -> Path:
     if os.environ.get("XDR_LAB_BOOTSTRAP_DIR"):
         return Path(os.environ["XDR_LAB_BOOTSTRAP_DIR"])
@@ -110,7 +116,10 @@ NAT observability (read-only verify in engine):
 CALDERA runtime:
   caldera verify [--wait] [--dry-run]
   caldera wait-ready [--dry-run]
-  agent deploy|verify [--json] [--dry-run]   (Sandcat helpers)
+  caldera config [--dry-run]
+  caldera adversaries list [--json] [--dry-run]
+  agent deploy [<vm> ...] [--dry-run]   (Sandcat helpers)
+  agent verify [--json] [--dry-run]
 
 Stellar Modular Data Sensor:
   sensor download --version VERSION [--force] [--dry-run]
@@ -250,6 +259,18 @@ def shell_cmd_exec(
         )
         raise RuntimeError(f"Command failed (rc={rc}): {' '.join(argv_list)}")
     return rc, out or "", err or ""
+
+
+def _load_json(path: Path) -> dict:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError, TypeError) as exc:
+        LOG.warning(
+            "structured_log",
+            extra={"event": "json_read_failed", "path": str(path), "error": str(exc)},
+        )
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def _lab_vm_names_effective() -> FrozenSet[str]:
@@ -744,13 +765,42 @@ def lab_validate_callback(argv: List[str], *, dry_run: bool) -> int:
 def lab_caldera_callback(argv: List[str], *, dry_run: bool) -> int:
     tokens, seen = _strip_flags(list(argv), ("--dry-run", "--wait"))
     dry_run = dry_run or seen["--dry-run"]
-    if not tokens or tokens[0] not in ("verify", "wait-ready"):
+    if not tokens or tokens[0] not in ("verify", "wait-ready", "config", "adversaries"):
         print(
             "Usage: aella_cli lab caldera verify [--wait] [--dry-run]\n"
-            "       aella_cli lab caldera wait-ready [--dry-run]",
+            "       aella_cli lab caldera wait-ready [--dry-run]\n"
+            "       aella_cli lab caldera config [--dry-run]\n"
+            "       aella_cli lab caldera adversaries list [--json] [--dry-run]",
             file=sys.stderr,
         )
         return 2
+    if tokens[0] == "adversaries":
+        tail = tokens[1:]
+        if tail not in (["list"], ["list", "--json"]):
+            print("Usage: aella_cli lab caldera adversaries list [--json] [--dry-run]", file=sys.stderr)
+            return 2
+        cmd = ["scenario", "adversaries", "list"]
+        if tail == ["list", "--json"]:
+            cmd.append("--json")
+        return _lab_invoke_script_caldera_dry(cmd, dry_run=dry_run)
+    if tokens[0] == "config":
+        if len(tokens) > 1:
+            print(f"Unexpected arguments: {' '.join(tokens[1:])}", file=sys.stderr)
+            return 2
+        cfg_path = _resolve_caldera_config()
+        doc = _load_json(cfg_path) if cfg_path.is_file() else {}
+        cal = doc.get("caldera") if isinstance(doc.get("caldera"), dict) else {}
+        bind_host = cal.get("bind_host") or doc.get("bind_host") or "0.0.0.0"
+        listen_port = cal.get("listen_port") or doc.get("listen_port") or 8888
+        base_url = cal.get("base_url") or doc.get("base_url") or "http://127.0.0.1:8888"
+        agent_base_url = cal.get("agent_base_url") or doc.get("agent_base_url") or "http://10.10.10.1:8888"
+        print(f"caldera_bind_host={bind_host}")
+        print(f"caldera_listen_port={listen_port}")
+        print(f"caldera_base_url={base_url}")
+        print(f"caldera_agent_base_url={agent_base_url}")
+        if dry_run:
+            print("dry_run=true")
+        return 0
     if len(tokens) > 1:
         print(f"Unexpected arguments: {' '.join(tokens[1:])}", file=sys.stderr)
         return 2
@@ -778,7 +828,7 @@ def lab_agent_callback(argv: List[str], *, dry_run: bool) -> int:
     dry_run = dry_run or seen["--dry-run"]
     if not tokens or tokens[0] not in ("deploy", "verify"):
         print(
-            "Usage: aella_cli lab agent deploy [--dry-run]\n"
+            "Usage: aella_cli lab agent deploy [<vm> ...] [--dry-run]\n"
             "       aella_cli lab agent verify [--json] [--dry-run]",
             file=sys.stderr,
         )
@@ -786,10 +836,9 @@ def lab_agent_callback(argv: List[str], *, dry_run: bool) -> int:
     sub = tokens[0]
     rest = tokens[1:]
     if sub == "deploy":
-        if rest:
-            print(f"Unexpected arguments: {' '.join(rest)}", file=sys.stderr)
-            return 2
-        return _lab_invoke_script_caldera_dry(["scenario", "agent", "deploy"], dry_run=dry_run)
+        for vm in rest:
+            _validate_lab_vm(vm, allow_all=False)
+        return _lab_invoke_script_caldera_dry(["scenario", "agent", "deploy", *rest], dry_run=dry_run)
     json_only = False
     for t in rest:
         if t == "--json":

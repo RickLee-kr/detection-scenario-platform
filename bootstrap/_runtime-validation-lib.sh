@@ -395,14 +395,49 @@ rv_caldera_base_url() {
     cfg="${_XDR_BOOTSTRAP_DIR}/../config/caldera-lab.json"
   fi
   if [[ -f "${cfg}" ]] && command -v jq &>/dev/null; then
-    jq -r '.base_url // "http://127.0.0.1:8888"' "${cfg}"
+    jq -r '.caldera.base_url // .base_url // "http://127.0.0.1:8888"' "${cfg}"
     return 0
   fi
   echo "http://127.0.0.1:8888"
 }
 
+rv_caldera_agent_base_url() {
+  local cfg="${XDR_LAB_CALDERA_CONFIG}"
+  if [[ ! -f "${cfg}" ]]; then
+    cfg="${_XDR_BOOTSTRAP_DIR}/../config/caldera-lab.json"
+  fi
+  if [[ -f "${cfg}" ]] && command -v jq &>/dev/null; then
+    jq -r '.caldera.agent_base_url // .agent_base_url // "http://10.10.10.1:8888"' "${cfg}"
+    return 0
+  fi
+  echo "http://10.10.10.1:8888"
+}
+
+rv_caldera_bind_host() {
+  local cfg="${XDR_LAB_CALDERA_CONFIG}"
+  if [[ ! -f "${cfg}" ]]; then
+    cfg="${_XDR_BOOTSTRAP_DIR}/../config/caldera-lab.json"
+  fi
+  if [[ -f "${cfg}" ]] && command -v jq &>/dev/null; then
+    jq -r '.caldera.bind_host // .bind_host // "0.0.0.0"' "${cfg}"
+    return 0
+  fi
+  echo "0.0.0.0"
+}
+
 rv_caldera_port() {
-  local url port
+  local cfg url port
+  cfg="${XDR_LAB_CALDERA_CONFIG}"
+  if [[ ! -f "${cfg}" ]]; then
+    cfg="${_XDR_BOOTSTRAP_DIR}/../config/caldera-lab.json"
+  fi
+  if [[ -f "${cfg}" ]] && command -v jq &>/dev/null; then
+    port="$(jq -r '.caldera.listen_port // .listen_port // empty' "${cfg}" 2>/dev/null || true)"
+    if [[ "${port}" =~ ^[0-9]+$ ]]; then
+      echo "${port}"
+      return 0
+    fi
+  fi
   url="$(rv_caldera_base_url)"
   if [[ "${url}" =~ :([0-9]+)(/|$) ]]; then
     port="${BASH_REMATCH[1]}"

@@ -684,13 +684,64 @@ def make_caldera_client(cfg: dict[str, Any], *, timeout_sec: float = 12.0) -> Ca
     )
 
 
+def caldera_runtime_cfg(cfg: dict[str, Any]) -> dict[str, Any]:
+    """Return the nested CALDERA runtime config, if present."""
+    cal = cfg.get("caldera")
+    return cal if isinstance(cal, dict) else {}
+
+
+def is_loopback_url(url: str) -> bool:
+    parsed = urlparse(str(url or "").strip())
+    return parsed.hostname in ("127.0.0.1", "localhost", "::1")
+
+
+def agent_base_url_invalid_reason(url: str) -> str:
+    raw = str(url or "").strip()
+    if not raw:
+        return "agent_base_url is empty"
+    parsed = urlparse(raw)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return f"agent_base_url is not an absolute HTTP(S) URL: {raw}"
+    if is_loopback_url(raw):
+        return f"agent_base_url must be guest-reachable, not loopback: {raw}"
+    return ""
+
+
+def resolve_agent_base_url(cfg: dict[str, Any]) -> str:
+    """Return the CALDERA URL that guest Sandcat agents should call back to."""
+    cal = caldera_runtime_cfg(cfg)
+    raw = str(
+        cal.get("agent_base_url")
+        or cfg.get("agent_base_url")
+        or cal.get("sandcat_base_url")
+        or cfg.get("sandcat_base_url")
+        or cal.get("guest_base_url")
+        or cfg.get("guest_base_url")
+        or ""
+    ).strip()
+    if raw:
+        return raw.rstrip("/")
+
+    base = str(cal.get("base_url") or cfg.get("base_url") or "http://127.0.0.1:8888").strip() or "http://127.0.0.1:8888"
+    parsed = urlparse(base)
+    if parsed.hostname in ("127.0.0.1", "localhost", "::1"):
+        port = f":{parsed.port}" if parsed.port else ""
+        return f"{parsed.scheme or 'http'}://10.10.10.1{port}".rstrip("/")
+    return base.rstrip("/")
+
+
 def load_lab_config(xdr_root: Path) -> dict[str, Any]:
     p = xdr_root / "config" / "caldera-lab.json"
     base = load_json(
         p,
         {
             "schema_version": 1,
-            "base_url": "http://127.0.0.1:8888",
+            "caldera": {
+                "bind_host": "0.0.0.0",
+                "listen_port": 8888,
+                "base_url": "http://127.0.0.1:8888",
+                "agent_base_url": "http://10.10.10.1:8888",
+            },
             "api_key_env": "XDR_CALDERA_API_KEY",
             "api_key_file": "/etc/xdr-lab/caldera-api-key",
             "default_planner": "atomic",
@@ -703,6 +754,19 @@ def load_lab_config(xdr_root: Path) -> dict[str, Any]:
     )
     if not isinstance(base, dict):
         return {}
+    cal = caldera_runtime_cfg(base)
+    if not cal:
+        cal = {}
+        base["caldera"] = cal
+    cal.setdefault("bind_host", base.get("bind_host") or "0.0.0.0")
+    cal.setdefault("listen_port", base.get("listen_port") or 8888)
+    cal.setdefault("base_url", base.get("base_url") or "http://127.0.0.1:8888")
+    cal.setdefault("agent_base_url", base.get("agent_base_url") or "http://10.10.10.1:8888")
+    # Keep legacy top-level accessors working while config/caldera-lab.json moves to caldera.*.
+    base["bind_host"] = str(cal.get("bind_host") or "0.0.0.0")
+    base["listen_port"] = int(cal.get("listen_port") or 8888)
+    base["base_url"] = str(cal.get("base_url") or "http://127.0.0.1:8888")
+    base["agent_base_url"] = str(cal.get("agent_base_url") or "http://10.10.10.1:8888")
     return base
 
 
@@ -2096,6 +2160,13 @@ def collect_scenario_run_preflight(
             f"(base_url={base_url}) — run: sudo bootstrap/ensure-caldera-api-key.sh; "
             "unset stale XDR_CALDERA_API_KEY",
         )
+    agent_base_url = resolve_agent_base_url(cfg)
+    agent_url_invalid = agent_base_url_invalid_reason(agent_base_url)
+    if agent_url_invalid:
+        add_live_gate(
+            "caldera_agent_url_invalid",
+            f"Guest Sandcat callback URL is invalid: {agent_url_invalid}",
+        )
     if snapshot_before and not vm_mgr_ok:
         add_block(
             "snapshot_vm_manager_missing",
@@ -2106,6 +2177,7 @@ def collect_scenario_run_preflight(
         {
             "caldera_base_url",
             "api_key",
+            "caldera_agent_url_invalid",
             "atomic_plugin",
             "atomic_red_team_paths",
             "atomic_bootstrap_scripts",
@@ -2727,6 +2799,10 @@ def server_bootstrap_block_from_cfg(
     pl = cfg.get("plugins")
     art = cfg.get("atomic_red_team")
     block: dict[str, Any] = {
+        "bind_host": str(cfg.get("bind_host") or "0.0.0.0"),
+        "listen_port": int(cfg.get("listen_port") or 8888),
+        "base_url": str(cfg.get("base_url") or "http://127.0.0.1:8888"),
+        "agent_base_url": resolve_agent_base_url(cfg),
         "plugins": list(pl) if isinstance(pl, list) else [],
         "atomic_red_team": dict(art) if isinstance(art, dict) else {},
         "bootstrap_install_status": "not_probed",
@@ -2747,7 +2823,10 @@ def default_caldera_doc(cfg: dict[str, Any]) -> dict[str, Any]:
     dep = cfg.get("deployment") if isinstance(cfg.get("deployment"), dict) else {}
     doc: dict[str, Any] = {
         "schema_version": 1,
+        "bind_host": str(cfg.get("bind_host") or "0.0.0.0"),
+        "listen_port": int(cfg.get("listen_port") or 8888),
         "base_url": str(cfg.get("base_url") or "http://127.0.0.1:8888"),
+        "agent_base_url": resolve_agent_base_url(cfg),
         "deployment": dep,
         "http_reachable": False,
         "api_authenticated": False,
@@ -3164,11 +3243,14 @@ def find_agent_paws(cfg: dict[str, Any], agents: list[dict[str, Any]], vm: str) 
     return paws
 
 
-def write_agent_bootstraps(xdr_root: Path, base_url: str, log_path: Path | None) -> None:
+def write_agent_bootstraps(xdr_root: Path, agent_base_url: str, log_path: Path | None) -> None:
     """Emit Sandcat-style bootstrap hints (operator runs on victim VMs)."""
     out_dir = xdr_root / "runtime" / "caldera-agent"
     out_dir.mkdir(parents=True, exist_ok=True)
-    bu = base_url.rstrip("/")
+    bu = agent_base_url.rstrip("/")
+    invalid_reason = agent_base_url_invalid_reason(bu)
+    if invalid_reason:
+        raise ValueError(f"caldera_agent_url_invalid: {invalid_reason}")
     # CALDERA standard Sandcat one-liners (HTTP contact); operator must pick correct binary in UI if needed.
     ps1 = out_dir / "bootstrap-windows.ps1"
     sh = out_dir / "bootstrap-linux.sh"
@@ -3203,6 +3285,7 @@ curl -fsSL "$SERVER/file/download/sandcat.go" | python3 - 2>/dev/null || curl -f
             "caldera_agent_bootstrap_written",
             windows_script=str(ps1),
             linux_script=str(sh),
+            agent_base_url=bu,
         )
 
 
@@ -3636,7 +3719,10 @@ def refresh_state(
             scenario_doc["caldera"].update(cal_in)
     _ensure_scenario_nested_defaults(scenario_doc)
     _touch_utc_aliases(scenario_doc)
+    caldera_doc["bind_host"] = str(cfg.get("bind_host") or "0.0.0.0")
+    caldera_doc["listen_port"] = int(cfg.get("listen_port") or 8888)
     caldera_doc["base_url"] = base_url
+    caldera_doc["agent_base_url"] = resolve_agent_base_url(cfg)
     caldera_doc["http_reachable"] = reachable
     caldera_doc["api_authenticated"] = authenticated
     caldera_doc["last_probe_utc"] = utc_now()
@@ -5454,26 +5540,75 @@ def cmd_agent_deploy(
     log_path: Path | None,
     *,
     cli_dry_run: bool,
+    target_roles: list[str] | None = None,
 ) -> int:
     is_dry = deploy_effective_dry(cli_dry_run)
     lab = load_lab_vms_json(xdr_root)
     nat_doc = load_nat_state_doc(stated)
     base_url = str(cfg.get("base_url") or "http://127.0.0.1:8888")
+    agent_base_url = resolve_agent_base_url(cfg)
     api_key = resolve_api_key(cfg)
     api_key_present = bool(api_key.strip())
+    roles = agent_vm_roles(cfg)
+    if target_roles:
+        unknown = [vm for vm in target_roles if vm not in roles]
+        if unknown:
+            print(
+                "Unknown CALDERA agent role(s): "
+                + ", ".join(unknown)
+                + f". Known roles: {', '.join(roles)}",
+                file=sys.stderr,
+            )
+            return 2
+        roles = target_roles
     vm_rows: list[dict[str, Any]] = []
     deploy_report: dict[str, Any] = {
         "utc": utc_now(),
         "dry_run": is_dry,
+        "agent_base_url": agent_base_url,
+        "targets": roles,
     }
     rc_all = 0
 
     print("=== CALDERA lab — agent deploy flow ===")
-    print("Targets: config/caldera-lab.json agents (sensor-vm, victim-linux, windows-victim)")
+    print(f"Targets: {', '.join(roles)}")
+    print(f"CALDERA API URL (host/orchestrator): {base_url}")
+    print(f"Sandcat callback URL (guest VMs): {agent_base_url}")
     print("1) Linux roles (sensor-vm, victim-linux): appliance→VM SSH, run bootstrap-linux.sh via bash on the guest")
     print("2) Windows (windows-victim): prefer SSH, then WinRM TCP per lab-vms.json external_nat_port_mapping;")
     print("   if only RDP is open, manual bootstrap guidance (no credential-less WinRM remote execution)")
     print("")
+
+    agent_url_invalid = agent_base_url_invalid_reason(agent_base_url)
+    if agent_url_invalid:
+        print(f"[failure] FAILURE_CLASS=caldera_agent_url_invalid {agent_url_invalid}")
+        exit_final = finalize_agent_deploy_report(
+            deploy_report,
+            is_dry=is_dry,
+            fatal_preflight=not is_dry,
+            fatal_reason="caldera_agent_url_invalid",
+            rc_partial=1,
+            nat_ok=True,
+            caldera_up=True,
+            api_key_present=api_key_present,
+            vm_rows=vm_rows,
+        )
+        refresh_state(
+            xdr_root,
+            stated,
+            cfg,
+            merge_caldera={"agent_deploy_last": deploy_report},
+            log_path=log_path,
+        )
+        if log_path:
+            log_jsonl(
+                log_path,
+                "caldera_agent_deploy_preflight_failed",
+                reason="caldera_agent_url_invalid",
+                detail=agent_url_invalid,
+                exit_code=exit_final,
+            )
+        return exit_final
 
     if not api_key_present:
         if is_dry:
@@ -5482,7 +5617,7 @@ def cmd_agent_deploy(
         else:
             print("[failure] CALDERA API key missing (preflight fatal — non-dry-run exits with code 2)")
             print("  → remediation: set XDR_CALDERA_API_KEY, caldera-lab.json api_key_file, or api_key_env.")
-            write_agent_bootstraps(xdr_root, base_url, log_path)
+            write_agent_bootstraps(xdr_root, agent_base_url, log_path)
             exit_final = finalize_agent_deploy_report(
                 deploy_report,
                 is_dry=False,
@@ -5524,7 +5659,7 @@ def cmd_agent_deploy(
         linux_body = ""
         ps1_body = ""
     else:
-        write_agent_bootstraps(xdr_root, base_url, log_path)
+        write_agent_bootstraps(xdr_root, agent_base_url, log_path)
         linux_body = sh_path.read_text(encoding="utf-8") if sh_path.is_file() else ""
         ps1_body = ps1_path.read_text(encoding="utf-8") if ps1_path.is_file() else ""
 
@@ -5552,7 +5687,7 @@ def cmd_agent_deploy(
         rc_all = 1
     allow_remote_exec = caldera_up and not is_dry
 
-    for vm in agent_vm_roles(cfg):
+    for vm in roles:
         row: dict[str, Any] = {"vm": vm, "status": "skipped", "detail": ""}
         spec = agent_spec_for_vm(cfg, vm)
         bootstrap = str(spec.get("bootstrap") or "").strip().lower()
@@ -6539,6 +6674,14 @@ def build_bootstrap_validate_remediations(checks: list[dict[str, Any]]) -> list[
             "Set XDR_CALDERA_API_KEY or api_key_file to match CALDERA conf/default.yml api_key_red; "
             "see docs/caldera-integration.md §3.",
         )
+    c_agent_url = by_id.get("caldera_agent_url_invalid")
+    if c_agent_url and not c_agent_url.get("ok"):
+        add(
+            "caldera_agent_url_invalid",
+            "Guest Sandcat callback URL is loopback, empty, or not an absolute HTTP(S) URL.",
+            "Set caldera.agent_base_url in config/caldera-lab.json to the guest-reachable bridge URL, "
+            "for example http://10.10.10.1:8888.",
+        )
     c_key = by_id.get("api_key")
     if c_key and not c_key.get("ok"):
         add(
@@ -6577,6 +6720,8 @@ def run_bootstrap_validation(
 ) -> dict[str, Any]:
     """Pre-flight checks for CALDERA, API key, plugins, ART paths, and repo bootstrap scripts."""
     base_url = str(cfg.get("base_url") or "http://127.0.0.1:8888").strip()
+    agent_base_url = resolve_agent_base_url(cfg)
+    agent_url_invalid = agent_base_url_invalid_reason(agent_base_url)
     api_key = resolve_api_key(cfg, xdr_root=xdr_root)
     api_key_ok = bool(api_key)
 
@@ -6618,6 +6763,12 @@ def run_bootstrap_validation(
             ),
         },
         {
+            "id": "caldera_agent_url_invalid",
+            "label": "Guest Sandcat callback URL is guest-reachable",
+            "ok": not bool(agent_url_invalid),
+            "detail": agent_base_url if not agent_url_invalid else agent_url_invalid,
+        },
+        {
             "id": "api_key",
             "label": "API key present",
             "ok": api_key_ok,
@@ -6657,6 +6808,7 @@ def run_bootstrap_validation(
         {
             "caldera_base_url",
             "caldera_api_authenticated",
+            "caldera_agent_url_invalid",
             "api_key",
             "atomic_plugin",
             "atomic_red_team_paths",
@@ -6668,6 +6820,7 @@ def run_bootstrap_validation(
     return {
         "ok": all_ok,
         "base_url": base_url,
+        "agent_base_url": agent_base_url,
         "checks": checks,
         "remediation_hints": remediations,
     }
@@ -6676,6 +6829,7 @@ def run_bootstrap_validation(
 def print_bootstrap_validate_human(report: dict[str, Any]) -> None:
     print("=== CALDERA / Atomic bootstrap validate ===")
     print(f"base_url: {report.get('base_url', '-')}")
+    print(f"agent_base_url: {report.get('agent_base_url', '-')}")
     print("")
     w_label, w_stat, w_detail = 34, 8, 48
     print(f"{'Check':<{w_label}} {'Status':<{w_stat}} Detail")
@@ -7540,6 +7694,65 @@ def cmd_runtime_evidence_export_jsonl(
     return 0
 
 
+def _adversary_rows(data: Any) -> list[dict[str, Any]]:
+    if isinstance(data, dict):
+        for key in ("adversaries", "data", "results", "items"):
+            val = data.get(key)
+            if isinstance(val, list):
+                data = val
+                break
+    if not isinstance(data, list):
+        return []
+    rows: list[dict[str, Any]] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        adv_id = str(item.get("adversary_id") or item.get("id") or "").strip()
+        name = str(item.get("name") or item.get("display_name") or "").strip()
+        desc = str(item.get("description") or "").strip()
+        if adv_id or name:
+            rows.append({"adversary_id": adv_id, "name": name, "description": desc})
+    return rows
+
+
+def cmd_adversaries_list(cfg: dict[str, Any], log_path: Path | None, *, json_out: bool) -> int:
+    """List CALDERA adversary ids without printing credentials."""
+    client = make_caldera_client(cfg)
+    code, data, err = client.rest_post({"index": "adversaries"}, log_path)
+    rows = _adversary_rows(data)
+    if code != 200 or err or not rows:
+        url = urljoin(client.base_url.rstrip("/") + "/", "api/v2/adversaries")
+        code2, data2, err2 = client.request_json("GET", url, log_path=log_path)
+        rows2 = _adversary_rows(data2)
+        if rows2 and code2 == 200 and not err2:
+            rows = rows2
+            err = None
+        elif not rows:
+            err = err or err2 or f"unexpected_http_{code or code2}"
+    payload = {
+        "base_url": client.base_url,
+        "result": "PASS" if rows and not err else "FAIL",
+        "count": len(rows),
+        "adversaries": rows,
+    }
+    if json_out:
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        print("=== CALDERA adversaries ===")
+        print(f"CALDERA URL: {client.base_url}")
+        if err:
+            print(f"RESULT: FAIL ({err})")
+        elif not rows:
+            print("RESULT: FAIL (no adversaries returned)")
+        else:
+            print("adversary_id                         | name")
+            print("------------------------------------ | ------------------------------")
+            for row in rows:
+                print(f"{row.get('adversary_id') or '-':36} | {row.get('name') or '-'}")
+            print("RESULT: PASS")
+    return 0 if rows and not err else 1
+
+
 def cmd_runtime_validate(
     xdr_root: Path,
     stated: Path,
@@ -7664,6 +7877,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("list", help="List configured scenarios + refresh state")
+    padv = sub.add_parser("adversaries", help="CALDERA adversary helpers")
+    padv_sub = padv.add_subparsers(dest="adversaries_cmd", required=True)
+    padv_list = padv_sub.add_parser("list", help="List CALDERA adversary UUIDs")
+    padv_list.add_argument("--json", action="store_true", help="Emit adversary list as JSON")
     pst_sc = sub.add_parser(
         "status",
         help="Print scenario.json + caldera.json (JSON). --human adds post-run review + last_live_run when present",
@@ -7760,6 +7977,11 @@ def build_parser() -> argparse.ArgumentParser:
     pver.add_argument("--json", action="store_true", help="Emit verification JSON")
     pade = pas.add_parser("deploy", help="Write bootstrap scripts and deploy to lab VMs (SSH / Windows paths)")
     pade.add_argument(
+        "target_roles",
+        nargs="*",
+        help="Optional agent role(s) to deploy (default: all configured roles)",
+    )
+    pade.add_argument(
         "--dry-run",
         action="store_true",
         help="Validate + write bootstrap; skip remote execution (also respects XDR_LAB_DRY_RUN)",
@@ -7827,6 +8049,10 @@ def main(argv: list[str] | None = None) -> int:
     cmd = args.cmd
     if cmd == "list":
         return cmd_list(cfg, stated, log_path)
+    if cmd == "adversaries":
+        if args.adversaries_cmd == "list":
+            return cmd_adversaries_list(cfg, log_path, json_out=bool(getattr(args, "json", False)))
+        return 2
     if cmd == "status":
         return cmd_status(cfg, stated, log_path, human=bool(getattr(args, "human", False)))
     if cmd == "run":
@@ -7892,6 +8118,7 @@ def main(argv: list[str] | None = None) -> int:
                 stated,
                 log_path,
                 cli_dry_run=bool(getattr(args, "dry_run", False)),
+                target_roles=[str(v) for v in getattr(args, "target_roles", [])],
             )
         if ac == "remove":
             return cmd_agent_remove(cfg, stated, log_path)

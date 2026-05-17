@@ -5,7 +5,7 @@
 #           patches conf/default.yml bind address, API key, optional plugins, systemd unit.
 #
 # Usage:
-#   sudo CALDERA_LISTEN_HOST=127.0.0.1 CALDERA_PORT=8888 \
+#   sudo CALDERA_LISTEN_HOST=0.0.0.0 CALDERA_PORT=8888 \
 #        ./bootstrap/caldera-server-bootstrap.sh
 #   ./bootstrap/caldera-server-bootstrap.sh --dry-run   # no root; no changes
 #
@@ -32,8 +32,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DRY_RUN=0
 CALDERA_HOME="${CALDERA_HOME:-/opt/caldera}"
 CALDERA_USER="${CALDERA_USER:-caldera}"
-CALDERA_LISTEN_HOST="${CALDERA_LISTEN_HOST:-127.0.0.1}"
+CALDERA_LISTEN_HOST="${CALDERA_LISTEN_HOST:-0.0.0.0}"
 CALDERA_PORT="${CALDERA_PORT:-8888}"
+CALDERA_AGENT_BASE_URL="${CALDERA_AGENT_BASE_URL:-http://10.10.10.1:${CALDERA_PORT}}"
 API_KEY_FILE="${API_KEY_FILE:-/etc/xdr-lab/caldera-api-key}"
 CALDERA_PLUGINS="${CALDERA_PLUGINS:-}"
 CALDERA_GIT_URL="${CALDERA_GIT_URL:-https://github.com/mitre/caldera.git}"
@@ -68,6 +69,7 @@ Planned configuration:
   CALDERA_USER=${CALDERA_USER}
   CALDERA_LISTEN_HOST=${CALDERA_LISTEN_HOST}
   CALDERA_PORT=${CALDERA_PORT}
+  CALDERA_AGENT_BASE_URL=${CALDERA_AGENT_BASE_URL}
   API_KEY_FILE=${API_KEY_FILE}
   CALDERA_PLUGINS=${CALDERA_PLUGINS:-<empty: sed-only patch>}
   CALDERA_GIT_URL=${CALDERA_GIT_URL}
@@ -167,7 +169,7 @@ if [[ -n "${CALDERA_PLUGINS// /}" ]]; then
 import sys
 import yaml
 
-path, host, port, plugins_csv = sys.argv[1:5]
+path, host, port, agent_base_url, plugins_csv = sys.argv[1:6]
 plugins = [p.strip() for p in plugins_csv.split(",") if p.strip()] if plugins_csv else None
 
 with open(path, "r", encoding="utf-8") as f:
@@ -175,7 +177,7 @@ with open(path, "r", encoding="utf-8") as f:
 
 data["host"] = host
 data["port"] = int(port)
-data["app.contact.http"] = f"http://{host}:{port}"
+data["app.contact.http"] = agent_base_url
 if plugins:
     data["plugins"] = plugins
 
@@ -183,14 +185,14 @@ with open(path, "w", encoding="utf-8") as f:
     yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
 PY
   )
-  sudo -u "${CALDERA_USER}" python3 -c "${PATCH_PY}" "${DEF_YML}" "${CALDERA_LISTEN_HOST}" "${CALDERA_PORT}" "${CALDERA_PLUGINS}"
+  sudo -u "${CALDERA_USER}" python3 -c "${PATCH_PY}" "${DEF_YML}" "${CALDERA_LISTEN_HOST}" "${CALDERA_PORT}" "${CALDERA_AGENT_BASE_URL}" "${CALDERA_PLUGINS}"
   sync_api_key_red_hash
 else
   log "conf/default.yml — sed patch host/port/app.contact.http; api_key_red via caldera_api_key_util (argon2)"
   sed -i \
     -e "s/^host:.*/host: ${CALDERA_LISTEN_HOST}/" \
     -e "s/^port:.*/port: ${CALDERA_PORT}/" \
-    -e "s|^app.contact.http:.*|app.contact.http: http://${CALDERA_LISTEN_HOST}:${CALDERA_PORT}|" \
+    -e "s|^app.contact.http:.*|app.contact.http: ${CALDERA_AGENT_BASE_URL}|" \
     "${DEF_YML}"
   sync_api_key_red_hash
 fi

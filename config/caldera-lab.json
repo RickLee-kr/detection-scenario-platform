@@ -5,7 +5,12 @@
     "Full annotated template lives in config/caldera-lab.json.example."
   ],
   "schema_version": 1,
-  "base_url": "http://127.0.0.1:8888",
+  "caldera": {
+    "bind_host": "0.0.0.0",
+    "listen_port": 8888,
+    "base_url": "http://127.0.0.1:8888",
+    "agent_base_url": "http://10.10.10.1:8888"
+  },
   "api_key_env": "XDR_CALDERA_API_KEY",
   "api_key_file": "/etc/xdr-lab/caldera-api-key",
   "default_planner": "atomic",
@@ -45,7 +50,7 @@
   "scenarios": {
     "_doc": "Set each scenario's adversary_id to a CALDERA adversary UUID — see docs §4.",
     "recon": {
-      "adversary_id": null,
+      "adversary_id": "0f4c3c67-845e-49a0-927e-90ed33c044e0",
       "description": "ping / nslookup / curl / scan (CALDERA adversary / operation)",
       "_recommended_caldera_profile": "Discovery"
     },

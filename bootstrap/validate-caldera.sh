@@ -45,6 +45,8 @@ SERVER_PY="${CALDERA_HOME}/server.py"
 UNIT_PATH="$(rv_caldera_service_unit_path)"
 BASE_URL="$(rv_caldera_base_url)"
 PORT="$(rv_caldera_port)"
+BIND_HOST="$(rv_caldera_bind_host)"
+AGENT_BASE_URL="$(rv_caldera_agent_base_url)"
 
 declare -a RESULTS=()
 declare -a FAIL_CODES=()
@@ -65,7 +67,7 @@ http_probe_reachable() {
   [[ "${code}" =~ ^(200|302|401|403)$ ]]
 }
 
-rv_log INFO "validate-caldera start home=${CALDERA_HOME} base_url=${BASE_URL} port=${PORT}"
+rv_log INFO "validate-caldera start home=${CALDERA_HOME} bind_host=${BIND_HOST} base_url=${BASE_URL} agent_base_url=${AGENT_BASE_URL} port=${PORT}"
 
 # (a) service file exists
 if [[ -f "${UNIT_PATH}" ]]; then
@@ -209,11 +211,11 @@ fi
 # guest path via lab gateway
 gw_url="http://${LAB_GATEWAY}:${PORT}"
 gw_required=1
-if [[ "${BASE_URL}" =~ ^https?://(127\.0\.0\.1|localhost)(:|/|$) ]]; then
+if [[ "${BIND_HOST}" =~ ^(127\.0\.0\.1|localhost|::1)$ ]]; then
   gw_required=0
 fi
 if [[ "${gw_required}" -eq 0 ]]; then
-  record http_via_gateway 1 "skipped — CALDERA binds loopback (${BASE_URL})" 0
+  record http_via_gateway 1 "skipped — CALDERA bind_host is loopback (${BIND_HOST})" 0
 elif http_probe_reachable "${gw_url}"; then
   read -r gw_code gw_loc _gw_ct < <(rv_caldera_agents_http_meta "${gw_url}")
   record http_via_gateway 1 "HTTP reachable at $(rv_url_join_path "${gw_url}" api/agents) (http_code=${gw_code} location=${gw_loc:-none})" 0
@@ -230,11 +232,11 @@ else
 fi
 
 if [[ "${JSON_MODE}" -eq 1 ]]; then
-  python3 - "${OVERALL_RC}" "${BASE_URL}" "${PORT}" "${LAB_GATEWAY}" "${CALDERA_HOME}" <<'PY' "${RESULTS[@]}"
+  python3 - "${OVERALL_RC}" "${BASE_URL}" "${PORT}" "${LAB_GATEWAY}" "${CALDERA_HOME}" "${BIND_HOST}" "${AGENT_BASE_URL}" <<'PY' "${RESULTS[@]}"
 import json, sys
 rc = int(sys.argv[1])
-base, port, gw, home = sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
-rows = sys.argv[6:]
+base, port, gw, home, bind_host, agent_base_url = sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6], sys.argv[7]
+rows = sys.argv[8:]
 checks = []
 for row in rows:
     status, cid, detail = row.split("\t", 2)
@@ -244,7 +246,9 @@ print(json.dumps({
     "ok": rc == 0,
     "exit_code": rc,
     "caldera_home": home,
+    "bind_host": bind_host,
     "base_url": base,
+    "agent_base_url": agent_base_url,
     "port": int(port),
     "lab_gateway": gw,
     "checks": checks,
@@ -252,6 +256,8 @@ print(json.dumps({
 PY
 else
   echo "=== validate-caldera (${BASE_URL}) ==="
+  echo "bind_host: ${BIND_HOST}"
+  echo "agent_base_url: ${AGENT_BASE_URL}"
   for row in "${RESULTS[@]}"; do
     IFS=$'\t' read -r status id detail <<<"${row}"
     printf '[%s] %-22s %s\n' "${status}" "${id}" "${detail}"

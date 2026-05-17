@@ -37,6 +37,10 @@ CALDERA_HOME="$(rv_caldera_home)"
 SERVER_PY="${CALDERA_HOME}/server.py"
 VENV_PY="${CALDERA_HOME}/.venv/bin/python3"
 UNIT_PATH="$(rv_caldera_service_unit_path)"
+CALDERA_BIND_HOST="$(rv_caldera_bind_host)"
+CALDERA_LISTEN_PORT="$(rv_caldera_port)"
+CALDERA_AGENT_BASE_URL="$(rv_caldera_agent_base_url)"
+CALDERA_MAIN_CONFIG="${CALDERA_HOME}/conf/default.yml"
 DOC_URL="file:///opt/xdr-lab/docs/caldera-integration.md"
 if [[ -n "${XDR_ROOT:-}" ]]; then
   DOC_URL="file://${XDR_ROOT}/docs/caldera-integration.md"
@@ -94,6 +98,7 @@ EOF
 )"
 
 if [[ "${DRY_RUN}" -eq 1 ]]; then
+  rv_log INFO "dry-run: would patch ${CALDERA_MAIN_CONFIG} bind_host=${CALDERA_BIND_HOST} listen_port=${CALDERA_LISTEN_PORT} agent_base_url=${CALDERA_AGENT_BASE_URL}"
   rv_log INFO "dry-run: would write ${UNIT_PATH} user=${RUNTIME_USER}"
   printf '%s\n' "${UNIT_BODY}"
   exit 0
@@ -102,6 +107,49 @@ fi
 if [[ "$(id -u)" -ne 0 ]]; then
   rv_log ERROR "run as root (sudo) to install systemd unit"
   exit 5
+fi
+
+rv_step_begin "patch caldera listen config"
+if [[ -f "${CALDERA_MAIN_CONFIG}" ]]; then
+  "${VENV_PY}" - "${CALDERA_MAIN_CONFIG}" "${CALDERA_BIND_HOST}" "${CALDERA_LISTEN_PORT}" "${CALDERA_AGENT_BASE_URL}" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+host = sys.argv[2]
+port = sys.argv[3]
+agent_base_url = sys.argv[4]
+lines = path.read_text(encoding="utf-8").splitlines()
+seen = {"host": False, "port": False, "app.contact.http": False}
+out = []
+for line in lines:
+    stripped = line.lstrip()
+    prefix = line[: len(line) - len(stripped)]
+    if stripped.startswith("host:"):
+        out.append(f"{prefix}host: {host}")
+        seen["host"] = True
+    elif stripped.startswith("port:"):
+        out.append(f"{prefix}port: {int(port)}")
+        seen["port"] = True
+    elif stripped.startswith("app.contact.http:"):
+        out.append(f"{prefix}app.contact.http: {agent_base_url}")
+        seen["app.contact.http"] = True
+    else:
+        out.append(line)
+for key, value in (
+    ("host", host),
+    ("port", str(int(port))),
+    ("app.contact.http", agent_base_url),
+):
+    if not seen[key]:
+        out.append(f"{key}: {value}")
+path.write_text("\n".join(out) + "\n", encoding="utf-8")
+PY
+  chown "${RUNTIME_USER}:${RUNTIME_USER}" "${CALDERA_MAIN_CONFIG}" || true
+  rv_step_end "patch caldera listen config" 0
+else
+  rv_log WARN "missing ${CALDERA_MAIN_CONFIG}; cannot patch host/port/app.contact.http"
+  rv_step_end "patch caldera listen config" 0
 fi
 
 rv_step_begin "write systemd unit"

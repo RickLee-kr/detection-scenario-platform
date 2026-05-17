@@ -9,15 +9,23 @@
 
   "schema_version": 1,
 
-  "_help_base_url": [
-    "CALDERA REST endpoint reachable from the appliance host AND from each",
-    "lab VM (so Sandcat agents can call back).",
+  "_help_caldera": [
+    "CALDERA runtime settings.",
+    "bind_host/listen_port control server listen config.",
+    "base_url is for local appliance/orchestrator REST calls.",
+    "agent_base_url is embedded into Sandcat bootstrap files for guest callbacks.",
     "Examples:",
     "  http://127.0.0.1:8888           (CALDERA on the appliance host)",
     "  http://10.10.10.40:8888         (CALDERA on test-vm1 inside the lab)",
-    "  https://caldera.example.lab     (operator-managed external instance)"
+    "  https://caldera.example.lab     (operator-managed external instance)",
+    "For the standard appliance host on br0, use http://10.10.10.1:8888."
   ],
-  "base_url": "http://127.0.0.1:8888",
+  "caldera": {
+    "bind_host": "0.0.0.0",
+    "listen_port": 8888,
+    "base_url": "http://127.0.0.1:8888",
+    "agent_base_url": "http://10.10.10.1:8888"
+  },
 
   "_help_plugins": [
     "Operator memo: align with CALDERA server conf/default.yml plugins (orchestrator does not apply this automatically).",
