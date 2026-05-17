@@ -84,6 +84,7 @@ Usage: aella_cli lab <subcommand> [args] [--dry-run]
 
 Core VM lifecycle:
   deploy <vm|all> [--nodownload] [--dry-run]
+  deploy sensor-vm [--cpus N] [--memory-mb N] [--disk-gb N] [--nodownload] [--dry-run]
   download [<vm|all|image_name>] [--force] [--dry-run]   (manifest bulk: lab download with no args)
   images status [--dry-run]
   start <vm|all> [--dry-run]
@@ -159,6 +160,8 @@ VM names include: sensor-vm, windows-victim, victim-linux, test-vm1 (or 'all' wh
 
 --dry-run prints the manager command line without executing it.
 --nodownload applies to deploy (skip manifest sync + legacy artifact downloads where applicable).
+sensor-vm is Stellar Cyber Modular Data Sensor only; size overrides enforce minimums: --cpus >= 4, --memory-mb >= 6144, --disk-gb >= 80.
+Stellar download credentials must be in /etc/xdr-lab/stellar-download.env with root-only permissions.
 Manifest-driven golden images are opt-in: enabled in config/images-manifest.json or XDR_LAB_USE_IMAGE_MANIFEST=1.
 """
 
@@ -451,14 +454,39 @@ def lab_deploy_callback(argv: List[str], *, dry_run: bool) -> int:
     tokens, seen = _strip_flags(list(argv), ("--nodownload", "--dry-run"))
     dry_run = dry_run or seen["--dry-run"]
     if not tokens:
-        print("Usage: aella_cli lab deploy <vm|all> [--nodownload] [--dry-run]", file=sys.stderr)
+        print(
+            "Usage: aella_cli lab deploy <vm|all> [--nodownload] [--dry-run]\n"
+            "       aella_cli lab deploy sensor-vm [--cpus N] [--memory-mb N] [--disk-gb N] [--nodownload] [--dry-run]",
+            file=sys.stderr,
+        )
         return 2
     target = tokens[0]
-    if len(tokens) > 1:
-        print(f"Unexpected arguments: {' '.join(tokens[1:])}", file=sys.stderr)
-        return 2
     _validate_lab_vm(target, allow_all=True)
-    extra = ["--nodownload"] if seen["--nodownload"] else None
+    extra: List[str] = []
+    if seen["--nodownload"]:
+        extra.append("--nodownload")
+    rest = tokens[1:]
+    i = 0
+    while i < len(rest):
+        flag = rest[i]
+        if flag not in ("--cpus", "--memory-mb", "--disk-gb"):
+            print(f"Unexpected argument: {flag!r}", file=sys.stderr)
+            return 2
+        if i + 1 >= len(rest):
+            print(f"{flag} requires a value", file=sys.stderr)
+            return 2
+        value = rest[i + 1]
+        minimum = {"--cpus": 4, "--memory-mb": 6144, "--disk-gb": 80}[flag]
+        if not value.isdigit() or int(value) < minimum:
+            print(f"{flag} must be an integer >= {minimum}", file=sys.stderr)
+            return 2
+        extra.extend([flag, value])
+        i += 2
+    if len(extra) > (1 if seen["--nodownload"] else 0) and target != "sensor-vm":
+        print("Sensor size overrides are only supported for sensor-vm", file=sys.stderr)
+        return 2
+    if not extra:
+        extra = None
     return _lab_invoke_manager("deploy", target, extra=extra, dry_run=dry_run)
 
 

@@ -25,7 +25,7 @@ if ! command -v python3 >/dev/null 2>&1; then
   fail "python3 missing"
 fi
 
-read -r declared_type cache_dir script_name image_url < <(python3 - "${cfg}" "${sensor}" <<'PY'
+read -r declared_type cache_dir script_name image_url qcow2_name < <(python3 - "${cfg}" "${sensor}" <<'PY'
 import json, sys
 path, sensor = sys.argv[1:3]
 with open(path, encoding="utf-8") as fh:
@@ -36,6 +36,7 @@ print(
     vm.get("sensor_cache_dir", ""),
     vm.get("virt_deploy_script_name", ""),
     vm.get("image_url", ""),
+    vm.get("qcow2_name", ""),
 )
 PY
 )
@@ -46,7 +47,7 @@ if [[ -n "${resolved_cache}" && "${resolved_cache}" != /* ]]; then
 fi
 
 script_path="${resolved_cache}/${script_name}"
-image_name="$(basename "${image_url:-sensor-base.qcow2}")"
+image_name="${qcow2_name:-$(basename "${image_url:-aella-modular-ds.qcow2}")}"
 image_path="${resolved_cache}/${image_name}"
 if [[ "${image_name}" == *.zst ]]; then
   image_path="${image_path%.zst}"
@@ -74,16 +75,17 @@ else
   state=""
 fi
 
-sensor_type="unknown"
-if [[ "${runtime_looks_generic}" -eq 1 || "${declared_type}" == "linux" || "${declared_type}" == "generic_linux" ]]; then
-  sensor_type="generic_linux"
-elif [[ "${declared_type}" == "sensor" && "${stellar_sensor_artifact_found}" == "true" ]]; then
-  sensor_type="stellar_sensor"
-elif [[ "${declared_type}" == "sensor" ]]; then
-  sensor_type="generic_linux"
-fi
+sensor_type="stellar_sensor"
 
 detail="sensor_type=${sensor_type} stellar_sensor_artifact_found=${stellar_sensor_artifact_found} stellar_sensor_ready=${stellar_sensor_ready}"
+
+if [[ "${declared_type}" != "sensor" ]]; then
+  fail "${detail} sensor-vm declared type must be sensor, got ${declared_type:-missing}"
+fi
+
+if [[ "${runtime_looks_generic}" -eq 1 ]]; then
+  fail "${detail} deprecated Ubuntu cloud-image runtime detected for sensor-vm; deploy Stellar Cyber Modular Data Sensor artifacts"
+fi
 
 if [[ -n "${state}" && "${state}" != "running" ]]; then
   fail "${detail} sensor domain defined but not running: ${state:-unknown}"
@@ -96,7 +98,7 @@ Missing required Stellar Sensor artifacts:
   ${image_path}
 Remediation:
   sudo install -D -m 0755 <artifact>/virt_deploy_modular_ds.sh ${script_path}
-  sudo install -D -m 0644 <artifact>/sensor-base.qcow2 ${image_path}
+  sudo install -D -m 0644 <artifact>/aella-modular-ds-<version>.qcow2 ${image_path}
 EOF
   fail "${detail} Missing required Stellar Sensor artifacts: ${script_path}; ${image_path}"
 fi

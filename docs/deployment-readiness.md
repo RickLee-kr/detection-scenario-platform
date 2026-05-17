@@ -40,11 +40,11 @@ cloud-image tooling, Python 3, jq, curl).
 
 | VM | vCPU | RAM (MiB) |
 | --- | --- | --- |
-| sensor-vm | 4 | 8192 |
+| sensor-vm | 4 | 6144 |
 | windows-victim | 2 | 4096 |
 | linux-server | 2 | 2048 |
 | test-vm1 | 1 | 1024 |
-| **Declared guest totals** | **9** | **15360** (~15 GiB) |
+| **Declared guest totals** | **9** | **13312** (~13 GiB) |
 
 ### 2.2 Host headroom (recommended)
 
@@ -84,7 +84,7 @@ guest growth.
 | Concern | Suggested planning range |
 | --- | --- |
 | Appliance root + `/var/lib/libvirt/images` | **≥ 200 GiB** thin for a minimal lab; **≥ 400 GiB** for comfortable snapshot and cache headroom |
-| `${XDR_BASE}/images` (downloads, Windows tree) | Size of your golden qcow2s plus Ubuntu cloud base — often **tens of GiB** |
+| `${XDR_BASE}/images` (downloads, Windows tree) | Size of your Stellar sensor qcow2, Windows golden qcow2s, and victim Linux cloud base — often **tens of GiB** |
 | `${XDR_BASE}/runtime` | Runtime disks grow with guest use; budget **snapshot overhead** on top of declared sizes |
 | Repository checkout (`images/`, `logs/`) | When `XDR_BASE` points at the repo, keep the same totals on the filesystem backing `PROJECT_ROOT` |
 
@@ -151,21 +151,15 @@ High-level view (same story as `README.md` §2):
 
 ## 8. Stellar Sensor Artifact Readiness
 
-The lab supports two distinct readiness levels:
-
-- `READY_FOR_GENERIC_LAB_SCENARIO`: infrastructure, NAT, OVS mirror, CALDERA,
-  and console paths are ready for generic lab VMs.
-- `READY_FOR_STELLAR_SENSOR_SCENARIO`: generic readiness plus real Stellar
-  Sensor artifacts are present.
-
-An Ubuntu cloud image booted as `sensor-vm` is reported as
-`sensor_type=generic_linux`. It is valid for generic lab infrastructure checks,
-but it is not a real Stellar Sensor. A Stellar-backed run requires both files in
-the sensor cache:
+Operational readiness is defined only for the official
+**Stellar Cyber Modular Data Sensor** architecture. An Ubuntu cloud-image VM
+used as `sensor-vm` is deprecated development material and cannot pass
+operational readiness. A live run requires both files in the versioned sensor
+cache:
 
 ```text
-/opt/xdr-lab/images/sensor/virt_deploy_modular_ds.sh
-/opt/xdr-lab/images/sensor/sensor-base.qcow2
+/opt/xdr-lab/images/sensor/6.2.0/virt_deploy_modular_ds.sh
+/opt/xdr-lab/images/sensor/6.2.0/aella-modular-ds-6.2.0.qcow2
 ```
 
 If these files are missing, validators print:
@@ -176,13 +170,24 @@ stellar_sensor_ready=false
 READY_FOR_STELLAR_SENSOR_SCENARIO=false
 ```
 
+When the real Stellar sensor is present, validators report:
+
+```text
+sensor_type=stellar_sensor
+stellar_sensor_artifact_found=true
+stellar_sensor_ready=true
+READY_FOR_STELLAR_SENSOR_SCENARIO=true
+```
+
 Install upstream artifacts explicitly:
 
 ```bash
-sudo install -D -m 0755 <artifact>/virt_deploy_modular_ds.sh /opt/xdr-lab/images/sensor/virt_deploy_modular_ds.sh
-sudo install -D -m 0644 <artifact>/sensor-base.qcow2 /opt/xdr-lab/images/sensor/sensor-base.qcow2
+sudo install -D -m 0755 <artifact>/virt_deploy_modular_ds.sh /opt/xdr-lab/images/sensor/6.2.0/virt_deploy_modular_ds.sh
+sudo install -D -m 0644 <artifact>/aella-modular-ds-6.2.0.qcow2 /opt/xdr-lab/images/sensor/6.2.0/aella-modular-ds-6.2.0.qcow2
 ```
 
+Stellar download credentials belong in `/etc/xdr-lab/stellar-download.env`
+with root-only permissions. Do not store them in code, JSON, git, or logs.
 Placeholder URLs such as `REPLACE_ME.example.invalid` are configuration errors.
 Download commands must stop with `CONFIG_PLACEHOLDER_ERROR` instead of trying to
 fetch them.

@@ -58,7 +58,8 @@ Logical layout (HTTPS or object storage):
 ```
 /xdr-lab/<release>/
   manifest.json              # URLs, sizes, sha256
-  sensor-base.qcow2
+  sensor/6.2.0/virt_deploy_modular_ds.sh
+  sensor/6.2.0/aella-modular-ds-6.2.0.qcow2
   windows-victim.qcow2
   linux-server.qcow2
   test-vm1.qcow2

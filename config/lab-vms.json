@@ -12,12 +12,17 @@
     "sensor-vm": {
       "name": "sensor-vm",
       "type": "sensor",
+      "sensor_type": "stellar_sensor",
       "hostname": "sensor-vm",
-      "virt_deploy_script_url": "https://REPLACE_ME.example.invalid/xdr-lab/virt_deploy_modular_ds.sh",
-      "image_url": "https://REPLACE_ME.example.invalid/xdr-lab/sensor-base.qcow2",
+      "sensor_product": "Stellar Cyber Modular Data Sensor",
+      "sensor_version": "6.2.0",
+      "stellar_download_env": "/etc/xdr-lab/stellar-download.env",
+      "virt_deploy_script_url": "https://stellar-download.example.invalid/6.2.0/virt_deploy_modular_ds.sh",
+      "image_url": "https://stellar-download.example.invalid/6.2.0/aella-modular-ds-6.2.0.qcow2",
       "bridge": "br0",
       "cpu": 4,
-      "memory": 8192,
+      "memory": 6144,
+      "memory_mb": 6144,
       "disk_size_gb": 80,
       "internal_ip": "10.10.10.10",
       "external_nat_port_mapping": {
@@ -26,9 +31,15 @@
         "ui": 8810
       },
       "autostart": true,
-      "sensor_cache_dir": "images/sensor",
+      "sensor_cache_dir": "images/sensor/6.2.0",
       "virt_deploy_script_name": "virt_deploy_modular_ds.sh",
-      "notes": "Replace URLs before production. CLI passes --nodownload when caches are warm."
+      "qcow2_name": "aella-modular-ds-6.2.0.qcow2",
+      "minimums": {
+        "cpu": 4,
+        "memory_mb": 6144,
+        "disk_size_gb": 80
+      },
+      "notes": "Official sensor VM is Stellar Cyber Modular Data Sensor only. Store download credentials in /etc/xdr-lab/stellar-download.env with root-only permissions; never commit credentials."
     },
     "windows-victim": {
       "name": "windows-victim",

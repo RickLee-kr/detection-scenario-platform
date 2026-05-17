@@ -300,20 +300,19 @@ run_component web_console validate-web-console.sh 0
 
 compute_overall
 FAILURE_CLASS="$(failure_class)"
-READY_FOR_GENERIC_LAB_SCENARIO="false"
 READY_FOR_STELLAR_SENSOR_SCENARIO="false"
+INFRASTRUCTURE_READY="false"
 if [[ "$(component_status_by_id host_network)" == "PASS" \
     && "$(component_status_by_id caldera)" == "PASS" \
     && "$(component_status_by_id libvirt)" == "PASS" \
     && "$(component_status_by_id ovs_mirror)" == "PASS" \
     && "$(component_status_by_id web_console)" == "PASS" ]]; then
-  READY_FOR_GENERIC_LAB_SCENARIO="true"
+  INFRASTRUCTURE_READY="true"
 fi
-if [[ "${READY_FOR_GENERIC_LAB_SCENARIO}" == "true" \
+if [[ "${INFRASTRUCTURE_READY}" == "true" \
     && "$(component_status_by_id sensor_identity)" == "PASS" ]]; then
   READY_FOR_STELLAR_SENSOR_SCENARIO="true"
 fi
-# Backwards-compatible legacy field: live scenario now means Stellar-backed live scenario.
 READY_FOR_LIVE_SCENARIO="${READY_FOR_STELLAR_SENSOR_SCENARIO}"
 
 if [[ "${JSON_MODE}" -eq 1 ]]; then
@@ -328,7 +327,7 @@ if [[ "${JSON_MODE}" -eq 1 ]]; then
     printf '%s\n' "${COMPONENT_STATUS[@]}"
   } >"${json_data_file}"
   python3 - "${OVERALL_RESULT}" "$(mode_label)" "${json_data_file}" "${FAILURE_CLASS}" \
-    "${READY_FOR_GENERIC_LAB_SCENARIO}" "${READY_FOR_STELLAR_SENSOR_SCENARIO}" <<'PY'
+    "${READY_FOR_STELLAR_SENSOR_SCENARIO}" <<'PY'
 import json, sys
 overall = sys.argv[1]
 mode = sys.argv[2]
@@ -354,9 +353,8 @@ print(json.dumps({
     "result": overall,
     "mode": mode,
     "failure_class": sys.argv[4] if len(sys.argv) > 4 else "unknown",
-    "READY_FOR_GENERIC_LAB_SCENARIO": sys.argv[5] == "true",
-    "READY_FOR_STELLAR_SENSOR_SCENARIO": sys.argv[6] == "true",
-    "READY_FOR_LIVE_SCENARIO": sys.argv[6] == "true",
+    "READY_FOR_STELLAR_SENSOR_SCENARIO": sys.argv[5] == "true",
+    "READY_FOR_LIVE_SCENARIO": sys.argv[5] == "true",
     "components": components,
 }, indent=2, sort_keys=True))
 PY
@@ -383,11 +381,10 @@ else
   echo "- Windows web console: $(readiness_label web_console "$(component_status_by_id web_console)")"
   echo
   echo "RESULT: ${OVERALL_RESULT}"
-  echo "READY_FOR_GENERIC_LAB_SCENARIO=${READY_FOR_GENERIC_LAB_SCENARIO}"
   echo "READY_FOR_STELLAR_SENSOR_SCENARIO=${READY_FOR_STELLAR_SENSOR_SCENARIO}"
   echo "READY_FOR_LIVE_SCENARIO=${READY_FOR_LIVE_SCENARIO}"
   echo "FAILURE_CLASS=${FAILURE_CLASS}"
 fi
 
-rv_log INFO "validate-appliance finished result=${OVERALL_RESULT} ready_for_generic_lab_scenario=${READY_FOR_GENERIC_LAB_SCENARIO} ready_for_stellar_sensor_scenario=${READY_FOR_STELLAR_SENSOR_SCENARIO} failure_class=${FAILURE_CLASS} exit=${OVERALL_RC}"
+rv_log INFO "validate-appliance finished result=${OVERALL_RESULT} infrastructure_ready=${INFRASTRUCTURE_READY} ready_for_stellar_sensor_scenario=${READY_FOR_STELLAR_SENSOR_SCENARIO} failure_class=${FAILURE_CLASS} exit=${OVERALL_RC}"
 exit "${OVERALL_RC}"

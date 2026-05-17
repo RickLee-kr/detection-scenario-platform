@@ -69,6 +69,9 @@ BACKUPS_DIR="${PROJECT_ROOT}/backups"
 # Sensor VM whose libvirt vNIC (vnetX) is auto-discovered as output-port.
 # Never hard-code vnetN — interface number changes across reboots.
 : "${XDR_LAB_SENSOR_VM:=sensor-vm}"
+# Stellar Modular Data Sensor download credentials. Keep this file root-owned
+# and mode 0600; never store credentials in repo JSON or git.
+: "${XDR_LAB_STELLAR_DOWNLOAD_ENV:=/etc/xdr-lab/stellar-download.env}"
 # Mirror runtime state file (single source of truth for OVS mirror facts).
 : "${XDR_LAB_MIRROR_STATE_JSON:=${XDR_RUNTIME_STATE_DIR}/mirror.json}"
 # Traffic-validation probe target inside the lab subnet (gateway by default).
@@ -113,7 +116,8 @@ export PROJECT_ROOT CONFIG_DIR IMAGE_DIR SCRIPT_DIR SCENARIO_DIR LOG_DIR \
        XDR_IMAGES_DIR XDR_RUNTIME_DIR XDR_RUNTIME_STATE_DIR XDR_LOGS_DIR \
        XDR_SCRIPTS_DIR LIBVIRT_IMAGE_DIR UBUNTU_CLOUD_BASE_IMG LAB_BRIDGE \
        LAB_OVS_NETWORK LAB_SUBNET_CIDR LAB_GATEWAY LAB_DNS LAB_UPLINK_IFACE \
-       XDR_LAB_MIRROR_NAME XDR_LAB_SENSOR_VM XDR_LAB_MIRROR_STATE_JSON \
+       XDR_LAB_MIRROR_NAME XDR_LAB_SENSOR_VM XDR_LAB_STELLAR_DOWNLOAD_ENV \
+       XDR_LAB_MIRROR_STATE_JSON \
        XDR_LAB_MIRROR_PROBE_TARGET XDR_LAB_NAT_STATE_JSON \
        XDR_LAB_NAT_WEB_CONSOLE_VM XDR_LAB_WINDOWS_IMAGES_DIR \
        XDR_LAB_WINDOWS_RECREATE_NVRAM XDR_LAB_WINDOWS_SSH_USER \

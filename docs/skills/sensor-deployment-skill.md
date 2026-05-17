@@ -7,13 +7,14 @@ Governed by spec 004. Read before changing the sensor branch in
 
 ## Hard rules
 
-- The sensor is a **special deploy type**, identified by
-  `name == "sensor-vm" || type == "sensor"` (M-12).
+- The official sensor is **Stellar Cyber Modular Data Sensor** only,
+  identified by `name == "sensor-vm"`, `type == "sensor"`, and
+  `sensor_type == "stellar_sensor"` (M-12).
 - The sensor deploy script `virt_deploy_modular_ds.sh` is **owned
   upstream** and MUST NOT be re-implemented inside the appliance
   (M-13, constitution P-2).
 - The sensor is deployed by invoking the upstream script from
-  its cache dir `/opt/xdr-lab/images/sensor/`:
+  its versioned cache dir, for example `/opt/xdr-lab/images/sensor/6.2.0/`:
   `cd "$sensor_cache_dir" && bash "./${script_name}" "${args[@]}"`.
 - The sensor is the **only** consumer of
   `/opt/xdr-lab/images/sensor/`.
@@ -32,9 +33,14 @@ Governed by spec 004. Read before changing the sensor branch in
 --gw "$gateway"
 --dns "$dns"
 --hostname "$hostname"
+--cpus "$cpus"
+--memory-mb "$memory_mb"
+--disk-gb "$disk_gb"
 ```
 
-Exactly these flags, in this order. No SPAN flags. No extra flags.
+Exactly these flags, in this order. No SPAN flags. Size values must satisfy
+`cpus >= 4`, `memory_mb >= 6144`, and `disk_gb >= 80`; CLI overrides are
+allowed only for `sensor-vm`.
 
 ## No-SPAN policy
 
@@ -45,10 +51,11 @@ recovery require a sensor redeploy, which is unacceptable.
 
 ## Download / cache invariants
 
-`download_vm_image sensor-vm` (spec 003 §3.1) MUST place:
+`download_vm_image sensor-vm` (spec 003 §3.1) MUST place, under the declared
+versioned `sensor_cache_dir`:
 
 - `${sensor_cache_dir}/${virt_deploy_script_name}` (chmod a+x).
-- `${sensor_cache_dir}/$(basename "$image_url")`.
+- `${sensor_cache_dir}/aella-modular-ds-<version>.qcow2`.
 
 `deploy_sensor_vm` requires both to exist; missing the script →
 `die "Sensor deploy script missing: … (run download first)"`.
@@ -57,25 +64,30 @@ Placeholder URLs (`REPLACE_ME.example.invalid`, `REPLACE_ME`, or other
 placeholder markers) are configuration errors. Download paths MUST stop with
 `CONFIG_PLACEHOLDER_ERROR` instead of attempting network access.
 
-When upstream Stellar Sensor artifacts are absent, report the mode explicitly:
+When upstream Stellar Sensor artifacts are absent, readiness MUST fail with:
 
-- `sensor_type=generic_linux`
+- `sensor_type=stellar_sensor`
 - `stellar_sensor_artifact_found=false`
 - `stellar_sensor_ready=false`
 
 The required upstream artifacts are:
 
 ```text
-/opt/xdr-lab/images/sensor/virt_deploy_modular_ds.sh
-/opt/xdr-lab/images/sensor/sensor-base.qcow2
+/opt/xdr-lab/images/sensor/6.2.0/virt_deploy_modular_ds.sh
+/opt/xdr-lab/images/sensor/6.2.0/aella-modular-ds-6.2.0.qcow2
 ```
 
 Operator remediation:
 
 ```bash
-sudo install -D -m 0755 <artifact>/virt_deploy_modular_ds.sh /opt/xdr-lab/images/sensor/virt_deploy_modular_ds.sh
-sudo install -D -m 0644 <artifact>/sensor-base.qcow2 /opt/xdr-lab/images/sensor/sensor-base.qcow2
+sudo install -D -m 0755 <artifact>/virt_deploy_modular_ds.sh /opt/xdr-lab/images/sensor/6.2.0/virt_deploy_modular_ds.sh
+sudo install -D -m 0644 <artifact>/aella-modular-ds-6.2.0.qcow2 /opt/xdr-lab/images/sensor/6.2.0/aella-modular-ds-6.2.0.qcow2
 ```
+
+Stellar download credentials must live in `/etc/xdr-lab/stellar-download.env`
+with root-only permissions. Never store them in code, JSON, git, or logs.
+Ubuntu cloud-image sensor VMs are deprecated development material only and
+must not pass operational readiness.
 
 ## Post-deploy validation
 
@@ -101,7 +113,7 @@ sudo install -D -m 0644 <artifact>/sensor-base.qcow2 /opt/xdr-lab/images/sensor/
 
 - **…inline `virt-install` into the sensor path:** stop. The
   upstream script owns the libvirt-define step (M-13).
-- **…pass `--span ...` "because the sensor needs to see traffic":**
+- **…pass the deploy script's SPAN mode "because the sensor needs to see traffic":**
   stop. Mirror configuration is spec 007's job.
 - **…hard-code `10.10.10.10` outside `lab-vms.json`:** stop. It's
   declared once.

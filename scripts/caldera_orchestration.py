@@ -4096,10 +4096,21 @@ def _print_scenario_status_human(
 
 
 def stellar_sensor_artifacts_present(xdr_root: Path) -> bool:
-    sensor_dir = xdr_root / "images" / "sensor"
-    return (sensor_dir / "virt_deploy_modular_ds.sh").is_file() and (
-        sensor_dir / "sensor-base.qcow2"
-    ).is_file()
+    sensor_dir = xdr_root / "images" / "sensor" / "6.2.0"
+    script_name = "virt_deploy_modular_ds.sh"
+    qcow2_name = "aella-modular-ds-6.2.0.qcow2"
+    cfg_path = xdr_root / "config" / "lab-vms.json"
+    try:
+        data = json.loads(cfg_path.read_text(encoding="utf-8"))
+        sensor = (data.get("vms") or {}).get("sensor-vm") or {}
+        cache = str(sensor.get("sensor_cache_dir") or "")
+        if cache:
+            sensor_dir = Path(cache) if Path(cache).is_absolute() else xdr_root / cache
+        script_name = str(sensor.get("virt_deploy_script_name") or script_name)
+        qcow2_name = str(sensor.get("qcow2_name") or Path(str(sensor.get("image_url") or qcow2_name)).name)
+    except (OSError, json.JSONDecodeError, TypeError):
+        pass
+    return (sensor_dir / script_name).is_file() and (sensor_dir / qcow2_name).is_file()
 
 
 def cmd_run(
@@ -4395,9 +4406,8 @@ def cmd_run(
             snapshot_before=snapshot_before,
             preflight_warnings=len(warns_raw),
         )
-    ready_for_generic = not blocks_raw and not gate_raw
-    ready_for_stellar = ready_for_generic and stellar_sensor_artifacts_present(xdr_root)
-    print(f"READY_FOR_GENERIC_LAB_SCENARIO={'true' if ready_for_generic else 'false'}")
+    infrastructure_ready = not blocks_raw and not gate_raw
+    ready_for_stellar = infrastructure_ready and stellar_sensor_artifacts_present(xdr_root)
     print(f"READY_FOR_STELLAR_SENSOR_SCENARIO={'true' if ready_for_stellar else 'false'}")
     print(f"READY_FOR_LIVE_SCENARIO={'true' if ready_for_stellar else 'false'}")
 

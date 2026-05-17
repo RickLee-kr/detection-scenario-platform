@@ -22,9 +22,9 @@ remote artifact host(s)
         ▼
 /opt/xdr-lab/images/
   ├── <vm>/<disk_filename>         (generic VMs; immutable after download)
-  └── sensor/
+  └── sensor/<version>/
         ├── virt_deploy_modular_ds.sh   (sensor deploy script; exec bit set)
-        └── <sensor base>.qcow2          (sensor base disk)
+        └── aella-modular-ds-<version>.qcow2
 ```
 
 L2 (the runtime layer) is the **only** writer to this tree. L1
@@ -49,10 +49,10 @@ never writes here.
 
 - Generic VMs: `${IMG}/<vm>/<disk_filename>` where `IMG =
   /opt/xdr-lab/images`.
-- Sensor: `${sensor_cache_dir}/<basename(image_url)>` and
+- Sensor: `${sensor_cache_dir}/aella-modular-ds-<version>.qcow2` and
   `${sensor_cache_dir}/${virt_deploy_script_name}`. The cache dir
   is declared in `lab-vms.json` (default
-  `/opt/xdr-lab/images/sensor`).
+  `/opt/xdr-lab/images/sensor/<version>`).
 
 ### 3.3 Verification
 
@@ -147,8 +147,10 @@ download_vm_image <vm>
   4. Run `aella_cli lab deploy <vm>`.
 - L2 MUST NOT silently re-download a base image because its URL
   changed; the operator initiates downloads.
-- Sensor script updates follow the same pattern via
-  `virt_deploy_script_url`.
+- Sensor script and qcow2 updates follow the same pattern via
+  `virt_deploy_script_url`, `image_url`, and `sensor_version`. Stellar
+  download credentials are read from `/etc/xdr-lab/stellar-download.env`
+  by operator tooling and must not be stored in code, JSON, or git.
 
 ## 10. Checksum Philosophy (forward-looking)
 
@@ -167,7 +169,7 @@ When implemented (next iteration):
 ## 11. Image Versioning Philosophy
 
 - `image_url` SHOULD encode an immutable version in the path or
-  query string (e.g. `…/sensor-base-2026.05.qcow2`). Mutable
+  query string (e.g. `…/aella-modular-ds-6.2.0.qcow2`). Mutable
   "latest" URLs are discouraged because they break reproducibility.
 - A future `version` field per VM in `lab-vms.json` MAY be added
   for human readability; it does NOT replace the URL.
@@ -213,8 +215,8 @@ A change to image handling is valid only if:
    to what was downloaded.
 5. Sensor cache layout is exactly
    `${sensor_cache_dir}/${virt_deploy_script_name}` and
-   `${sensor_cache_dir}/<basename(image_url)>` — the sensor deploy
-   script depends on this.
+   `${sensor_cache_dir}/aella-modular-ds-<version>.qcow2` — the sensor
+   deploy script depends on this.
 6. Once `sha256` is added to `lab-vms.json`, every successful
    download produces an `image_checksum_ok` event and every
    mismatch produces an `image_checksum_failed` event followed by

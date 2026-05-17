@@ -117,7 +117,23 @@ aella_cli lab mirror verify
 
 ---
 
-## 7. Snapshot validation (live libvirt only)
+## 7. Stellar sensor readiness (live host only)
+
+Operational readiness requires the real Stellar Cyber Modular Data Sensor
+artifacts, not a development cloud-image VM:
+
+```bash
+${XDR_ROOT:-/opt/xdr-lab}/bootstrap/validate-sensor-identity.sh
+${XDR_ROOT:-/opt/xdr-lab}/bootstrap/validate-appliance.sh --strict
+```
+
+**Pass:** output includes `sensor_type=stellar_sensor`,
+`stellar_sensor_artifact_found=true`, `stellar_sensor_ready=true`, and
+`READY_FOR_STELLAR_SENSOR_SCENARIO=true`.
+
+---
+
+## 8. Snapshot validation (live libvirt only)
 
 ```bash
 aella_cli lab snapshot create ci-smoke --dry-run
@@ -128,14 +144,14 @@ space.
 
 ---
 
-## 8. Environment sanity workflow
+## 9. Environment sanity workflow
 
 For a full pass on real hardware, run **`docs/environment-sanity-checklist.md`**
 end-to-end, then **`docs/release-candidate-checklist.md`** for RC gating.
 
 ---
 
-## 9. Suggested CI job skeleton (example)
+## 10. Suggested CI job skeleton (example)
 
 ```yaml
 # Illustrative only — adapt to your runner image.
@@ -151,7 +167,7 @@ steps:
 
 ---
 
-## 10. See also
+## 11. See also
 
 - `docs/live-run-playbook.md`
 - `docs/runtime-evidence-collection.md`

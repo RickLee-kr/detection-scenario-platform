@@ -1012,6 +1012,13 @@ print(cfg.get("network", {}).get(key, ""))
 PY
 }
 
+require_positive_int_at_least() {
+  local label="$1" value="$2" minimum="$3"
+  if ! [[ "${value}" =~ ^[0-9]+$ ]] || [[ "${value}" -lt "${minimum}" ]]; then
+    die "${label} must be an integer >= ${minimum}; got ${value:-<empty>}"
+  fi
+}
+
 get_lab_subnet_cidr() {
   python3 - "$CFG" <<'PY'
 import json, sys
@@ -1041,6 +1048,19 @@ config_url_is_placeholder() {
   local url="${1:-}" lowered
   lowered="$(printf '%s' "${url}" | tr '[:upper:]' '[:lower:]')"
   [[ -z "${url}" || "${lowered}" == *"replace_me.example.invalid"* || "${lowered}" == *"replace_me"* || "${lowered}" == *"placeholder"* ]]
+}
+
+validate_stellar_download_env() {
+  local env_file="${XDR_LAB_STELLAR_DOWNLOAD_ENV:-/etc/xdr-lab/stellar-download.env}"
+  [[ -f "${env_file}" ]] || die "Stellar download credentials missing: ${env_file} (root-only env file required for sensor downloads)"
+  local mode owner
+  mode="$(stat -c '%a' "${env_file}" 2>/dev/null || echo "")"
+  owner="$(stat -c '%U' "${env_file}" 2>/dev/null || echo "")"
+  [[ "${owner}" == "root" ]] || die "Stellar download credentials must be owned by root: ${env_file}"
+  [[ "${mode}" =~ ^[0-7]+$ ]] || die "Unable to inspect permissions for Stellar download credentials: ${env_file}"
+  if (( 8#${mode} & 077 )); then
+    die "Stellar download credentials must be root-only (0600 or stricter): ${env_file}"
+  fi
 }
 
 # -----------------------------------------------------------------------------
@@ -1078,6 +1098,9 @@ image_manifest_sync() {
   local select="${1:-MANIFEST_ALL}"
   manifest_enabled || return 0
   require_cmd python3
+  if [[ "${select}" == "sensor-vm" ]]; then
+    validate_stellar_download_env
+  fi
   if manifest_selection_has_placeholder_url "${select}"; then
     die "CONFIG_PLACEHOLDER_ERROR: refusing manifest download because ${XDR_LAB_IMAGES_MANIFEST} contains REPLACE_ME.example.invalid placeholder URLs for select=${select}. Replace URLs or install artifacts manually."
   fi
@@ -1807,6 +1830,7 @@ PY
 
   if [[ "$vm" == "sensor-vm" || "$vtype" == "sensor" ]]; then
     local sdir script_url img_url script_name
+    validate_stellar_download_env
     sdir="$(lab_resolve_path "$(get_vm_field "$vm" sensor_cache_dir)")"
     script_url="$(get_vm_field "$vm" virt_deploy_script_url)"
     img_url="$(get_vm_field "$vm" image_url)"
@@ -1859,7 +1883,7 @@ deploy_sensor_vm() {
   local nodownload="${2:-0}"
 
   require_cmd virsh
-  local sdir script_name ip gw dns mask hostn
+  local sdir script_name ip gw dns mask hostn cpu mem disk_gb
   sdir="$(lab_resolve_path "$(get_vm_field "$vm" sensor_cache_dir)")"
   script_name="$(get_vm_field "$vm" virt_deploy_script_name)"
   ip="$(get_vm_field "$vm" internal_ip)"
@@ -1867,6 +1891,13 @@ deploy_sensor_vm() {
   dns="$(net_global_field dns)"
   mask="$(net_global_field netmask)"
   hostn="$(get_vm_field "$vm" hostname)"
+  cpu="${XDR_LAB_SENSOR_CPUS_OVERRIDE:-$(vm_json_field_optional "$vm" cpu "4")}"
+  mem="${XDR_LAB_SENSOR_MEMORY_MB_OVERRIDE:-$(vm_json_field_optional "$vm" memory_mb "$(vm_json_field_optional "$vm" memory "6144")")}"
+  disk_gb="${XDR_LAB_SENSOR_DISK_GB_OVERRIDE:-$(vm_json_field_optional "$vm" disk_size_gb "80")}"
+
+  require_positive_int_at_least "--cpus" "$cpu" 4
+  require_positive_int_at_least "--memory-mb" "$mem" 6144
+  require_positive_int_at_least "--disk-gb" "$disk_gb" 80
 
   [[ -x "${sdir}/${script_name}" ]] || die "Sensor deploy script missing: ${sdir}/${script_name} (run download first)"
 
@@ -1874,10 +1905,10 @@ deploy_sensor_vm() {
   if [[ "$nodownload" == "1" ]]; then
     args+=(--nodownload)
   fi
-  args+=(--libvirt-network "${LAB_OVS_NETWORK}" --ip "$ip" --netmask "$mask" --gw "$gw" --dns "$dns" --hostname "$hostn")
+  args+=(--libvirt-network "${LAB_OVS_NETWORK}" --ip "$ip" --netmask "$mask" --gw "$gw" --dns "$dns" --hostname "$hostn" --cpus "$cpu" --memory-mb "$mem" --disk-gb "$disk_gb")
 
-  # SPAN mode intentionally not used per requirements.
-  log_structured "INFO" "deploy_sensor_vm_exec vm=${vm} libvirt_network=${LAB_OVS_NETWORK} nodownload=${nodownload}"
+  # Sensor traffic collection stays on the OVS mirror path; no SPAN flag is passed.
+  log_structured "INFO" "deploy_sensor_vm_exec vm=${vm} libvirt_network=${LAB_OVS_NETWORK} nodownload=${nodownload} cpus=${cpu} memory_mb=${mem} disk_gb=${disk_gb}"
   ( cd "$sdir" && bash "./${script_name}" "${args[@]}" )
 
   validate_sensor_deployment "$vm" "$ip" "$hostn"
@@ -3633,6 +3664,7 @@ Image cache (manifest-driven, opt-in: enabled in ${XDR_LAB_IMAGES_MANIFEST} or X
 
 Examples:
   xdr-lab-vm-manager.sh deploy sensor-vm
+  xdr-lab-vm-manager.sh deploy sensor-vm --cpus 4 --memory-mb 6144 --disk-gb 80
   xdr-lab-vm-manager.sh deploy windows-victim
   xdr-lab-vm-manager.sh windows-console windows-victim
   xdr-lab-vm-manager.sh web-console start windows-victim
@@ -3680,7 +3712,8 @@ Examples:
   xdr-lab-vm-manager.sh cleanup all                # stop + destroy all VMs from lab-vms.json
 
 Notes:
-  --nodownload skips re-downloading cached artifacts (sensor script/qcow2, victim-linux cloud base).
+  --nodownload skips re-downloading cached artifacts (Stellar sensor script/qcow2, victim-linux cloud base).
+  sensor-vm is Stellar Cyber Modular Data Sensor only; --cpus/--memory-mb/--disk-gb enforce minimums 4/6144/80.
   victim-linux: set XDR_LAB_SKIP_REBOOT_TEST=1 to skip post-deploy reboot validation.
   victim-linux: deploy failures preserve VM, disk, seed.iso, and ${XDR_RUNTIME_DIR}/victim-linux/cloud-init/ (no auto rollback).
   windows-victim: deploy failures preserve VM, disk, and ${XDR_RUNTIME_DIR}/windows-victim/nvram/ (no auto rollback).
@@ -3751,6 +3784,10 @@ main() {
 
   local target="${2:-}"
   local extra="${3:-}"
+  local extra_args=( )
+  if [[ $# -gt 2 ]]; then
+    extra_args=("${@:3}")
+  fi
 
   if [[ "$action" == "access" ]]; then
     log_structured "INFO" "cli action=access"
@@ -3844,12 +3881,39 @@ main() {
     fi
   fi
 
-  local nodownload=0
-  if [[ "${extra:-}" == "--nodownload" ]]; then
-    nodownload=1
+  local nodownload=0 sensor_cpus="" sensor_memory_mb="" sensor_disk_gb=""
+  local i=0
+  while [[ "${i}" -lt "${#extra_args[@]}" ]]; do
+    case "${extra_args[$i]}" in
+      --nodownload)
+        nodownload=1
+        ;;
+      --cpus|--memory-mb|--disk-gb)
+        local flag="${extra_args[$i]}"
+        i=$((i + 1))
+        if [[ "${i}" -ge "${#extra_args[@]}" ]]; then
+          die "${flag} requires a value"
+        fi
+        case "${flag}" in
+          --cpus) sensor_cpus="${extra_args[$i]}" ;;
+          --memory-mb) sensor_memory_mb="${extra_args[$i]}" ;;
+          --disk-gb) sensor_disk_gb="${extra_args[$i]}" ;;
+        esac
+        ;;
+      *)
+        die "Unknown option for ${action} ${target}: ${extra_args[$i]}"
+        ;;
+    esac
+    i=$((i + 1))
+  done
+  if [[ -n "${sensor_cpus}${sensor_memory_mb}${sensor_disk_gb}" ]]; then
+    [[ "${action}" == "deploy" && "${target}" == "sensor-vm" ]] || die "--cpus/--memory-mb/--disk-gb are only supported for deploy sensor-vm"
+    export XDR_LAB_SENSOR_CPUS_OVERRIDE="${sensor_cpus:-}"
+    export XDR_LAB_SENSOR_MEMORY_MB_OVERRIDE="${sensor_memory_mb:-}"
+    export XDR_LAB_SENSOR_DISK_GB_OVERRIDE="${sensor_disk_gb:-}"
   fi
 
-  log_structured "INFO" "cli action=${action} target=${target} nodownload=${nodownload}"
+  log_structured "INFO" "cli action=${action} target=${target} nodownload=${nodownload} sensor_cpus=${sensor_cpus:-} sensor_memory_mb=${sensor_memory_mb:-} sensor_disk_gb=${sensor_disk_gb:-}"
 
   case "$action" in
     deploy)

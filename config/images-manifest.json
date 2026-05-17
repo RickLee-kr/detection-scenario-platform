@@ -1,33 +1,33 @@
 {
   "schema_version": 1,
   "enabled": false,
-  "comment": "Set enabled=true (or export XDR_LAB_USE_IMAGE_MANIFEST=1) to use manifest-driven downloads. Replace url/sha256/size_bytes with real artifacts.",
+  "comment": "Set enabled=true (or export XDR_LAB_USE_IMAGE_MANIFEST=1) to use manifest-driven downloads. Sensor artifacts are Stellar Cyber Modular Data Sensor files; keep download credentials in /etc/xdr-lab/stellar-download.env, never in git.",
   "images": [
     {
       "name": "sensor-virt-deploy-script",
       "vm_role": "sensor-vm",
-      "version": "0.0.0-placeholder",
-      "url": "https://REPLACE_ME.example.invalid/xdr-lab/virt_deploy_modular_ds.sh",
+      "version": "6.2.0",
+      "url": "https://stellar-download.example.invalid/6.2.0/virt_deploy_modular_ds.sh",
       "compressed": false,
       "compression": null,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "size_bytes": 0,
-      "output_path": "images/sensor/virt_deploy_modular_ds.sh",
+      "output_path": "images/sensor/6.2.0/virt_deploy_modular_ds.sh",
       "required": true,
       "chmod_executable": true
     },
     {
-      "name": "sensor-base-qcow2",
+      "name": "aella-modular-ds-qcow2",
       "vm_role": "sensor-vm",
-      "version": "0.0.0-placeholder",
-      "url": "https://REPLACE_ME.example.invalid/xdr-lab/sensor-base.qcow2.zst",
-      "compressed": true,
-      "compression": "zst",
+      "version": "6.2.0",
+      "url": "https://stellar-download.example.invalid/6.2.0/aella-modular-ds-6.2.0.qcow2",
+      "compressed": false,
+      "compression": null,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "size_bytes": 0,
-      "output_path": "images/sensor/sensor-base.qcow2",
+      "output_path": "images/sensor/6.2.0/aella-modular-ds-6.2.0.qcow2",
       "required": true,
-      "keep_compressed_artifact": true
+      "keep_compressed_artifact": false
     },
     {
       "name": "victim-linux-cloudimg",

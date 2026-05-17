@@ -6,16 +6,19 @@
 
 ## 1. Goal
 
-Define how the **Sensor VM** is deployed. The sensor is the XDR/NDR
-sensor under test; its deploy path is intentionally **different
-from generic VMs**:
+Define how the **Sensor VM** is deployed. The official sensor is the
+**Stellar Cyber Modular Data Sensor**; its deploy path is intentionally
+different from ordinary lab VMs:
 
-- It uses a dedicated, externally-delivered modular deploy script
-  (`virt_deploy_modular_ds.sh`).
+- It uses the externally delivered Stellar modular deploy script
+  (`virt_deploy_modular_ds.sh`) and a versioned
+  `aella-modular-ds-<version>.qcow2`.
 - It has a **fixed bridge** (`br0`), a **fixed internal IP**
   (today `10.10.10.10`), and a **fixed hostname**.
 - It does **not** use SPAN/mirror as part of its own deploy;
   mirror configuration is a separate concern (spec 007).
+- Ubuntu cloud-image sensor VMs are deprecated development placeholders
+  only and do not satisfy runtime readiness.
 
 This spec exists because the sensor's onboarding contract is owned
 upstream and cannot be re-implemented inside the appliance.
@@ -25,18 +28,21 @@ upstream and cannot be re-implemented inside the appliance.
 ```
 config (lab-vms.json :: vms.sensor-vm)
   ├─ type               = "sensor"
+  ├─ sensor_type        = "stellar_sensor"
+  ├─ sensor_version     = "6.2.0"
   ├─ hostname           = "sensor-vm"
   ├─ bridge             = "br0"          (M-10)
   ├─ internal_ip        = "10.10.10.10"  (in 10.10.10.0/24, M-11)
   ├─ virt_deploy_script_url
   ├─ virt_deploy_script_name = "virt_deploy_modular_ds.sh"
-  ├─ image_url          (sensor base qcow2)
-  └─ sensor_cache_dir   = "/opt/xdr-lab/images/sensor"
+  ├─ image_url          (aella-modular-ds-<version>.qcow2)
+  ├─ qcow2_name         = "aella-modular-ds-6.2.0.qcow2"
+  └─ sensor_cache_dir   = "/opt/xdr-lab/images/sensor/6.2.0"
 
 L3 sensor cache:
-  /opt/xdr-lab/images/sensor/
+  /opt/xdr-lab/images/sensor/6.2.0/
     ├── virt_deploy_modular_ds.sh   (chmod a+x)
-    └── <sensor-base>.qcow2
+    └── aella-modular-ds-6.2.0.qcow2
 
 L2 sensor deploy:
   cd /opt/xdr-lab/images/sensor && \
@@ -47,7 +53,10 @@ L2 sensor deploy:
        --netmask 255.255.255.0 \
        --gw 10.10.10.1 \
        --dns 10.10.10.1 \
-       --hostname sensor-vm
+       --hostname sensor-vm \
+       --cpus 4 \
+       --memory-mb 6144 \
+       --disk-gb 80
 
 Post-deploy validation:
   virsh dominfo sensor-vm   (must succeed; otherwise WARN)
@@ -61,13 +70,15 @@ Post-deploy validation:
 `lab-vms.json::vms.sensor-vm` declares all sensor-specific fields.
 It MUST contain at minimum:
 
-- `name = "sensor-vm"` and `type = "sensor"` (either is sufficient
-  for L2 to route to the sensor path; both SHOULD be set).
+- `name = "sensor-vm"`, `type = "sensor"`, and
+  `sensor_type = "stellar_sensor"`.
+- `sensor_version` (for example `6.2.0`) and versioned
+  `sensor_cache_dir`.
 - `hostname`, `bridge`, `internal_ip`.
 - `virt_deploy_script_url`, `virt_deploy_script_name`,
   `image_url`, `sensor_cache_dir`.
-- `cpu`, `memory_mb`, `disk_size_gb` (advisory; honored by the
-  upstream deploy script).
+- `cpu`, `memory_mb`, `disk_size_gb` with minimums `4`, `6144`,
+  and `80`.
 - `external_nat_port_mapping` (spec 010).
 - `autostart`.
 
@@ -81,8 +92,8 @@ Owned by `download_vm_image sensor-vm` (spec 003):
 
 - Downloads the script to `${sensor_cache_dir}/${virt_deploy_script_name}`
   and makes it executable.
-- Downloads the sensor base qcow2 to
-  `${sensor_cache_dir}/$(basename image_url)`.
+- Downloads the Stellar sensor qcow2 to
+  `${sensor_cache_dir}/${qcow2_name}` or `${sensor_cache_dir}/$(basename image_url)`.
 - Both files are overwritten on re-download.
 
 ### 3.3 L2 — Sensor deploy
@@ -96,7 +107,8 @@ Owned by `download_vm_image sensor-vm` (spec 003):
 3. Require `virsh` (the upstream script defines a libvirt domain
    under the hood).
 4. Read sensor fields: `sensor_cache_dir`,
-   `virt_deploy_script_name`, `bridge`, `internal_ip`, `hostname`.
+   `virt_deploy_script_name`, `bridge`, `internal_ip`, `hostname`,
+   `cpu`, `memory_mb`, and `disk_size_gb`.
 5. Read network fields: `netmask`, `gateway`, `dns`.
 6. Verify the deploy script is executable at
    `${sensor_cache_dir}/${virt_deploy_script_name}`; if not →
@@ -109,11 +121,15 @@ Owned by `download_vm_image sensor-vm` (spec 003):
           --ip "$internal_ip"
           --netmask "$mask"
           --gw "$gateway"
-          --dns "$dns"
-          --hostname "$hostname")
+         --dns "$dns"
+         --hostname "$hostname"
+         --cpus "$cpu"
+         --memory-mb "$memory_mb"
+         --disk-gb "$disk_gb")
    ```
    **SPAN flags are intentionally NOT passed.** (See §6 below and
-   spec 007.)
+   spec 007.) CLI overrides are allowed only for `sensor-vm` and must
+   satisfy `cpus >= 4`, `memory_mb >= 6144`, `disk_gb >= 80`.
 8. `cd "$sensor_cache_dir" && bash "./${script_name}" "${args[@]}"`.
 9. Call `validate_sensor_deployment` (see §3.4).
 10. Reconcile autostart with `apply_autostart sensor-vm`.
@@ -138,11 +154,15 @@ Validation is observability, not gating.
 
 - `br0` exists and carries `10.10.10.0/24`.
 - The sensor deploy script's contract is stable:
-  `--bridge --ip --netmask --gw --dns --hostname [--nodownload]`.
+  `--libvirt-network --ip --netmask --gw --dns --hostname --cpus
+  --memory-mb --disk-gb [--nodownload]`.
   If upstream introduces new required flags, this spec MUST be
   updated before the runtime changes.
 - The operator has network access to download the deploy script
-  and the sensor base qcow2 (or has pre-warmed the cache).
+  and the Stellar sensor qcow2 (or has pre-warmed the cache).
+- Stellar download credentials live in `/etc/xdr-lab/stellar-download.env`
+  with root-only permissions. Credentials MUST NOT be stored in code,
+  JSON, git history, or logs.
 
 ## 5. Runtime Flow
 
@@ -178,10 +198,12 @@ time**. Rationale:
 - The sensor's interface for receiving mirrored traffic is the
   same `br0`-attached NIC; OVS mirror (spec 007) delivers the
   copy without involving the sensor's deploy CLI.
+- Ubuntu 20.04+/22.04+/24.04 appliance hosts use the OVS mirror
+  path only; Linux bridge based SPAN layouts are legacy material.
 
 Implementer rules:
 
-- L2 MUST NOT pass `--span` (or equivalent) to
+- L2 MUST NOT pass the upstream SPAN-mode flag (or equivalent) to
   `virt_deploy_modular_ds.sh`.
 - L2 MUST NOT add SPAN-related arguments to the sensor's argument
   vector.
@@ -276,3 +298,6 @@ A sensor-deployment change is valid only if:
    `--dns 10.10.10.1`, `--hostname sensor-vm` — and nothing
    else.
 5. No SPAN flag is ever present.
+6. `validate-appliance.sh` and `scenario run --dry-run` expose only
+   `READY_FOR_STELLAR_SENSOR_SCENARIO` / `READY_FOR_LIVE_SCENARIO`;
+   ordinary lab infrastructure readiness is not a sensor readiness label.

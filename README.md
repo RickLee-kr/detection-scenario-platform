@@ -20,7 +20,7 @@ under ESXi) into a fully orchestrated lab:
 
 - A **lab L2 segment** (10.10.10.0/24) hosted on an Open vSwitch bridge `br0`.
 - Three classes of VMs orchestrated by `aella_cli lab`:
-  - `sensor-vm`     — NDR sensor / packet collector with SPAN-like mirror.
+  - `sensor-vm`     — **Stellar Cyber Modular Data Sensor** VM, deployed from `virt_deploy_modular_ds.sh` plus versioned qcow2.
   - `victim-linux`  — cloud-init provisioned Ubuntu 24.04 (attack target / pivot).
   - `windows-victim`— qcow2 Windows endpoint (EDR / behavioural surface).
   - `test-vm1`      — disposable Linux for ad-hoc scenarios.
@@ -112,6 +112,22 @@ python3 python3-pip jq curl
 User `aella` must be in groups `libvirt`, `kvm`, `sudo`. The host must
 have a writable libvirt image pool at `/var/lib/libvirt/images`.
 
+### Stellar Cyber Modular Data Sensor artifacts
+
+The official sensor architecture uses only Stellar Cyber Modular Data Sensor
+artifacts. For version `6.2.0`, cache these files under
+`/opt/xdr-lab/images/sensor/6.2.0/`:
+
+```text
+virt_deploy_modular_ds.sh
+aella-modular-ds-6.2.0.qcow2
+```
+
+Stellar download credentials must never be committed to code, JSON, or git.
+Store them in `/etc/xdr-lab/stellar-download.env` with root-only permissions.
+Ubuntu cloud-image based sensor VMs are deprecated development placeholders
+only and do not satisfy operational readiness.
+
 ---
 
 ## 4. KVM / Open vSwitch architecture
@@ -196,6 +212,10 @@ output_port=<sensor tap>`). The mirror is one-directional: the sensor
 cannot inject traffic. This is the substrate for IDS / packet capture
 without re-cabling the lab.
 
+The sensor management NIC attaches to `br0`; traffic collection remains the
+existing OVS mirror path. Do not use the upstream deploy script's SPAN mode on
+Ubuntu 20.04+/22.04+/24.04 appliance hosts.
+
 See `docs/specs/007-ovs-mirror-policy/spec.md` for the policy and
 `docs/skills/ovs-mirror-skill.md` for the operational runbook.
 
@@ -240,10 +260,14 @@ performed post-boot via WinRM (a future phase).
 ```
 aella_cli appliance status | info
 aella_cli lab deploy|download|start|stop|destroy|status <vm|all> [--nodownload] [--dry-run]
+aella_cli lab deploy sensor-vm [--cpus N] [--memory-mb N] [--disk-gb N] [--nodownload]
 aella_cli lab snapshot create|revert|list|delete [<vm>] [<name>] [--dry-run]
 ```
 
 `windows-victim` (UEFI/pflash) uses **external disk-only** snapshots; Linux VMs use internal libvirt snapshots. See `docs/runtime-state-inspection.md` §6.
+
+`sensor-vm` sizing overrides are Stellar-sensor-only and enforce minimums:
+`--cpus >= 4`, `--memory-mb >= 6144`, `--disk-gb >= 80`.
 
 ```
 aella_cli lab mirror apply|verify|traffic [--dry-run]
@@ -431,7 +455,7 @@ xdr-lab-appliance/
 │   ├── caldera-lab.json.example        # annotated CALDERA config template
 │   └── ovs-net.xml                     # libvirt definition for ovs-net
 ├── cloud-init/
-│   ├── sensor-vm/{user-data,meta-data} # key-only template examples
+│   ├── sensor-vm/{user-data,meta-data} # deprecated dev-only placeholder, not official sensor deployment
 │   ├── test-vm1/{user-data,meta-data}
 │   ├── test-vm2/{user-data,meta-data}
 │   └── test-vm1-extras/                # alternate key-only test-vm1 template

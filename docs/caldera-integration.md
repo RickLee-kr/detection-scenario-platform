@@ -930,8 +930,12 @@ Complete **in order** before the real `PUT` operation. Commands: `aella_cli lab 
 3. **`bootstrap validate`**: exit 0 (§5.1b).
 4. **`atomic validate`**: exit 0 (§5.1c).
 5. **`agent deploy`** (optional `--dry-run` first) then **`agent status`** shows target VMs `true` (§5.6).
-6. **Snapshot / mirror**: `--snapshot-before` is §7; for NDR validation pass mirror/probe per §11.1–11.2.
-7. **Human read-through**: `aella_cli lab scenario status --human` for `expected_telemetry` provenance, `last_error`, agent summary.
+6. **Stellar sensor readiness**: `validate-sensor-identity.sh` reports
+   `sensor_type=stellar_sensor`, `stellar_sensor_artifact_found=true`, and
+   `stellar_sensor_ready=true`; `validate-appliance.sh --strict` reports
+   `READY_FOR_STELLAR_SENSOR_SCENARIO=true`.
+7. **Snapshot / mirror**: `--snapshot-before` is §7; for NDR validation pass mirror/probe per §11.1–11.2.
+8. **Human read-through**: `aella_cli lab scenario status --human` for `expected_telemetry` provenance, `last_error`, agent summary.
 
 If execution misbehaves follow §9.0 triage order (bootstrap → atomic → agent → pack → status).
 
@@ -951,7 +955,7 @@ aella_cli lab scenario run recon --snapshot-before
 6. **ART guests**: `aella_cli lab scenario atomic validate` [`--json`] — `linux-server`·`windows-victim` ART clone + execution checks (`caldera.json::atomic_red_team_validate_last`).
 7. **Reachability**: `aella_cli lab scenario list`, `scenario agent deploy --dry-run` → real `agent deploy` if needed.
 8. **Dry-run**: `aella_cli lab scenario run <id> --dry-run` for payload/state transitions.
-9. **Execute / observe**: enable mirror/sensor capture; `scenario run <id> --snapshot-before`; `scenario status`; correlate `expected_telemetry` in NDR/EDR.
+9. **Execute / observe**: enable mirror/Stellar sensor capture; `scenario run <id> --snapshot-before`; `scenario status`; correlate `expected_telemetry` in NDR/EDR.
 10. **Stop / recover**: `scenario stop`; revert snapshot if needed (Section 7).
 
 **Safety**: CALDERA abilities and ART can perform real offensive actions. Do **not** run against production assets or open internet paths. ART bootstrap defaults avoid auto-running tests (Section 2.4).
@@ -999,6 +1003,7 @@ aella_cli lab scenario status --human
 | **Sandcat** | `agent deploy` exits **0** for automated paths; **`agent status`** shows expected lab roles **`true`**; CALDERA UI **Agents** lists beacons with fresh `last_seen` (§10.1). |
 | **Dry-run** | `run … --dry-run` prints preflight summary, planned operation payload concept, snapshot name (if requested), and ends with `status=dry_run` in `scenario.json` — no `missing_adversary_id` text (§8). |
 | **Live operation** | `run … --snapshot-before` prints stdout JSON including **`caldera_operation_id`**; JSONL shows `scenario_live_run_submitted` (§9.3); CALDERA UI **Operations** shows a new operation and a **timeline** of abilities moving across agents. |
+| **Stellar sensor** | `validate-appliance.sh --strict` prints `READY_FOR_STELLAR_SENSOR_SCENARIO=true`; the sensor cache contains `virt_deploy_modular_ds.sh` and `aella-modular-ds-<version>.qcow2`. |
 | **Mirror / NDR** | With OVS mirror healthy (§11.1), **sensor-side tcpdump** or NDR queries show **new** sessions or datagrams involving target victim IPs during the operation window (ICMP/DNS/HTTP patterns depend on adversary). |
 | **Human status** | `scenario status --human` shows post-run review text, `last_live_run` populated after submit, and agent/telemetry pointers consistent with what you observed in UI and PCAP (§9.1). |
 
@@ -1509,6 +1514,7 @@ curl -s -H "KEY: $XDR_CALDERA_API_KEY" \
   | jq '.[] | {id: .adversary_id, name: .name}'
 
 # (3) Appliance sanity + CALDERA·Atomic bootstrap preflight
+aella_cli lab validate --strict
 aella_cli lab scenario bootstrap validate
 aella_cli lab scenario atomic validate
 aella_cli lab scenario list
