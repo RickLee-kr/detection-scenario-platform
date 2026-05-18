@@ -180,6 +180,13 @@ sed -e "s|/opt/xdr-lab|${XDR_ROOT}|g" \
   > /etc/systemd/system/xdr-lab-host-network.service
 rm -f /etc/systemd/system/xdr-lab-host-network.service.tmp
 
+install -m 0644 "${PROJECT_ROOT}/installer/xdr-lab-web-console@.service" \
+  /etc/systemd/system/xdr-lab-web-console@.service.tmp
+sed -e "s|/opt/xdr-lab|${XDR_ROOT}|g" \
+  /etc/systemd/system/xdr-lab-web-console@.service.tmp \
+  > /etc/systemd/system/xdr-lab-web-console@.service
+rm -f /etc/systemd/system/xdr-lab-web-console@.service.tmp
+
 ensure_xdr_lab_group() {
   if ! getent group "${XDR_LAB_GROUP}" >/dev/null 2>&1; then
     groupadd --system "${XDR_LAB_GROUP}"
@@ -287,6 +294,10 @@ install_systemd_unit() {
 }
 
 install_systemd_unit xdr-lab-host-network.service
+
+if ! systemctl enable xdr-lab-web-console@windows-victim.service; then
+  echo "WARN: failed to enable xdr-lab-web-console@windows-victim.service (optional management console)" >&2
+fi
 
 if [[ -f /opt/caldera/server.py ]]; then
   CALDERA_RUNTIME_CHANGED=0

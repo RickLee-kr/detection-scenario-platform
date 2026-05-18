@@ -130,6 +130,8 @@ Windows browser / VNC console hints:
   web-console start [vm] [--dry-run]   (default vm: windows-victim)
   web-console stop [vm] [--dry-run]
   web-console status [vm] [--dry-run]
+  web-console enable [vm] [--dry-run]
+  web-console disable [vm] [--dry-run]
   web-console verify [vm] [--dry-run]   (websockify / VNC wiring check)
   windows-console [vm] [--dry-run]
 
@@ -969,12 +971,12 @@ def lab_web_console_callback(argv: List[str], *, dry_run: bool) -> int:
     dry_run = dry_run or seen["--dry-run"]
     if not tokens:
         print(
-            "Usage: aella_cli lab web-console start|stop|status|verify [vm] [--dry-run]",
+            "Usage: aella_cli lab web-console start|stop|status|enable|disable|verify [vm] [--dry-run]",
             file=sys.stderr,
         )
         return 2
     sub = tokens[0]
-    if sub not in ("start", "stop", "status", "verify"):
+    if sub not in ("start", "stop", "status", "enable", "disable", "verify"):
         print(f"Unknown lab web-console subcommand: {sub!r}", file=sys.stderr)
         return 2
     vm = "windows-victim"

@@ -6,7 +6,10 @@
 
 : "${XDR_LAB_WEB_CONSOLE_DIR:=${XDR_RUNTIME_DIR}/web-console}"
 : "${XDR_LAB_WEB_CONSOLE_PORT:=6080}"
-: "${XDR_LAB_WEB_CONSOLE_BIND:=0.0.0.0}"
+: "${XDR_LAB_WEB_CONSOLE_BIND:=127.0.0.1}"
+: "${XDR_LAB_WEB_CONSOLE_RETRY_SECS:=10}"
+: "${XDR_LAB_WINDOWS_VICTIM_VNC_PORT:=5902}"
+: "${XDR_LAB_WINDOWS_VICTIM_VNC_DISPLAY:=:2}"
 
 xdr_primary_ipv4() {
   python3 - <<'PY' 2>/dev/null || true
@@ -32,6 +35,19 @@ xdr_pid_alive() {
   kill -0 "$pid" 2>/dev/null
 }
 
+xdr_tcp_open_local() {
+  local host="$1" port="$2" timeout="${3:-1.0}"
+  python3 - "$host" "$port" "$timeout" <<'PY' >/dev/null 2>&1
+import socket, sys
+host, port, timeout = sys.argv[1], int(sys.argv[2]), float(sys.argv[3])
+try:
+    with socket.create_connection((host, port), timeout=timeout):
+        pass
+except OSError:
+    sys.exit(1)
+PY
+}
+
 xdr_vnc_proxy_manifest_path() {
   local vm="${1:-windows-victim}"
   printf '%s/%s.json' "${XDR_LAB_VNC_PROXY_DIR}" "${vm}"
@@ -40,6 +56,52 @@ xdr_vnc_proxy_manifest_path() {
 xdr_web_console_manifest_path() {
   local vm="${1:-windows-victim}"
   printf '%s/%s.json' "${XDR_LAB_WEB_CONSOLE_DIR}" "${vm}"
+}
+
+xdr_web_console_unit_name() {
+  local vm="${1:-windows-victim}"
+  printf 'xdr-lab-web-console@%s.service' "${vm}"
+}
+
+xdr_systemctl_available() {
+  command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]
+}
+
+xdr_web_console_unit_installed() {
+  local unit="$1" template=""
+  if [[ "$unit" == *@*.service ]]; then
+    template="${unit%@*}@.service"
+  fi
+  if [[ -f "/etc/systemd/system/${unit}" || -f "/lib/systemd/system/${unit}" || -f "/usr/lib/systemd/system/${unit}" ]]; then
+    return 0
+  fi
+  [[ -n "$template" ]] || return 1
+  [[ -f "/etc/systemd/system/${template}" || -f "/lib/systemd/system/${template}" || -f "/usr/lib/systemd/system/${template}" ]]
+}
+
+xdr_web_console_systemd_state() {
+  local unit="$1"
+  if ! command -v systemctl >/dev/null 2>&1; then
+    echo "systemctl unavailable"
+    return 0
+  fi
+  local active enabled
+  active="$(systemctl is-active "$unit" 2>/dev/null || true)"
+  enabled="$(systemctl is-enabled "$unit" 2>/dev/null || true)"
+  echo "active=${active:-unknown}, enabled=${enabled:-unknown}"
+}
+
+xdr_web_console_listen_socket() {
+  local port="$1"
+  if command -v ss >/dev/null 2>&1; then
+    local socket
+    socket="$(ss -H -ltn "sport = :${port}" 2>/dev/null | awk 'NF {print $4; exit}' || true)"
+    if [[ -n "$socket" ]]; then
+      echo "$socket"
+      return 0
+    fi
+  fi
+  echo "<none>"
 }
 
 xdr_vnc_manifest_read_field() {
@@ -95,6 +157,77 @@ xdr_parse_qemu_vnc_display() {
   printf '%s|%s' "$num" "$((5900 + num))"
 }
 
+xdr_ensure_windows_victim_vnc_xml() {
+  local vm="${1:-windows-victim}"
+  [[ "$vm" == "windows-victim" ]] || return 0
+  require_cmd virsh
+
+  local old_xml new_xml
+  old_xml="$(mktemp)"
+  new_xml="$(mktemp)"
+
+  if ! virsh dumpxml --inactive "$vm" >"$old_xml" 2>/dev/null; then
+    if ! virsh dumpxml "$vm" >"$old_xml" 2>/dev/null; then
+      rm -f "$old_xml" "$new_xml"
+      return 1
+    fi
+  fi
+
+  if ! python3 - "$old_xml" "$new_xml" "${XDR_LAB_WINDOWS_VICTIM_VNC_PORT}" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+src, dst, port = sys.argv[1:4]
+tree = ET.parse(src)
+root = tree.getroot()
+devices = root.find("devices")
+if devices is None:
+    devices = ET.SubElement(root, "devices")
+
+graphics = None
+for node in devices.findall("graphics"):
+    if node.get("type") == "vnc":
+        graphics = node
+        break
+if graphics is None:
+    graphics = ET.SubElement(devices, "graphics", {"type": "vnc"})
+
+graphics.set("type", "vnc")
+graphics.set("listen", "127.0.0.1")
+graphics.set("port", str(port))
+graphics.set("autoport", "no")
+
+listen = None
+for node in graphics.findall("listen"):
+    if node.get("type", "address") == "address":
+        listen = node
+        break
+if listen is None:
+    listen = ET.SubElement(graphics, "listen", {"type": "address"})
+listen.set("type", "address")
+listen.set("address", "127.0.0.1")
+
+ET.indent(tree, space="  ")
+Path(dst).write_text(ET.tostring(root, encoding="unicode") + "\n", encoding="utf-8")
+PY
+  then
+    rm -f "$old_xml" "$new_xml"
+    return 1
+  fi
+
+  if cmp -s "$old_xml" "$new_xml"; then
+    rm -f "$old_xml" "$new_xml"
+    return 0
+  fi
+  if ! virsh define "$new_xml" >/dev/null; then
+    rm -f "$old_xml" "$new_xml"
+    return 1
+  fi
+  rm -f "$old_xml" "$new_xml"
+  log_structured "INFO" "windows_vnc_xml_fixed vm=${vm} listen=127.0.0.1 port=${XDR_LAB_WINDOWS_VICTIM_VNC_PORT} autoport=no"
+}
+
 xdr_qemu_vnc_diagnostics() {
   local vm="$1"
   local raw disp num port
@@ -126,6 +259,15 @@ xdr_windows_vnc_listen_port() {
   else
     echo ""
   fi
+}
+
+xdr_web_console_target_port() {
+  local vm="${1:-windows-victim}"
+  if [[ "$vm" == "windows-victim" ]]; then
+    echo "${XDR_LAB_WINDOWS_VICTIM_VNC_PORT}"
+    return 0
+  fi
+  xdr_windows_vnc_listen_port "$vm"
 }
 
 # Per-VM websockify listen port: XDR_LAB_WEB_CONSOLE_PORT_MAP="windows-build=6081,windows-victim=6082"
@@ -431,6 +573,9 @@ web_console_start() {
   if ! vm_exists "$vm"; then
     die "web-console start: domain not defined: ${vm}"
   fi
+  if ! xdr_ensure_windows_victim_vnc_xml "$vm"; then
+    die "web-console start: failed to enforce fixed VNC XML for ${vm}"
+  fi
   local st
   st="$(virsh domstate "$vm" 2>/dev/null | tr -d '\r' || true)"
   if [[ "$st" != "running" ]]; then
@@ -442,10 +587,14 @@ web_console_start() {
   novnc_src="$(xdr_find_novnc_webroot 2>/dev/null || true)"
   webroot="$(xdr_prepare_web_console_webroot "$novnc_src" 2>/dev/null || true)"
   vnc_disp="$(xdr_virsh_vncdisplay_raw "$vm" 2>/dev/null || true)"
-  vnc_port="$(xdr_windows_vnc_listen_port "$vm")"
+  vnc_port="$(xdr_web_console_target_port "$vm")"
   if [[ -z "$vnc_port" ]]; then
     xdr_qemu_vnc_diagnostics "$vm"
     die "web-console start: could not resolve QEMU VNC port for ${vm}"
+  fi
+  if ! xdr_tcp_open_local 127.0.0.1 "$vnc_port" 1.0; then
+    xdr_qemu_vnc_diagnostics "$vm"
+    die "web-console start: fixed QEMU VNC target is not listening: 127.0.0.1:${vnc_port}"
   fi
   mf="$(xdr_web_console_manifest_path "$vm")"
   bind="${XDR_LAB_WEB_CONSOLE_BIND}"
@@ -506,6 +655,98 @@ PY
   log_structured "INFO" "web_console_started vm=${vm} websockify_pid=${pid} listen=${bind}:${lport} target=127.0.0.1:${vnc_port}"
 }
 
+web_console_serve() {
+  local vm="${1:-windows-victim}"
+  require_cmd virsh
+  local retry="${XDR_LAB_WEB_CONSOLE_RETRY_SECS}"
+  while true; do
+    if ! vm_exists "$vm"; then
+      log_structured "WARN" "web_console_service_wait vm=${vm} reason=domain_missing retry=${retry}"
+      echo "web-console service: domain not defined: ${vm}; retrying in ${retry}s" >&2
+      sleep "$retry"
+      continue
+    fi
+    if ! xdr_ensure_windows_victim_vnc_xml "$vm"; then
+      log_structured "WARN" "web_console_service_wait vm=${vm} reason=vnc_xml_fix_failed retry=${retry}"
+      echo "web-console service: failed to enforce fixed VNC XML for ${vm}; retrying in ${retry}s" >&2
+      sleep "$retry"
+      continue
+    fi
+
+    local st
+    st="$(virsh domstate "$vm" 2>/dev/null | tr -d '\r' || true)"
+    if [[ "$st" != "running" ]]; then
+      log_structured "INFO" "web_console_service_wait vm=${vm} state=${st:-unknown} retry=${retry}"
+      echo "web-console service: VM ${vm} is not running (state=${st:-unknown}); retrying in ${retry}s" >&2
+      sleep "$retry"
+      continue
+    fi
+
+    local ws_bin novnc_src webroot vnc_port vnc_disp mf bind lport old_pid
+    ws_bin="$(xdr_websockify_cmd 2>/dev/null || true)"
+    novnc_src="$(xdr_find_novnc_webroot 2>/dev/null || true)"
+    webroot="$(xdr_prepare_web_console_webroot "$novnc_src" 2>/dev/null || true)"
+    vnc_disp="$(xdr_virsh_vncdisplay_raw "$vm" 2>/dev/null || true)"
+    vnc_port="$(xdr_web_console_target_port "$vm")"
+    mf="$(xdr_web_console_manifest_path "$vm")"
+    bind="${XDR_LAB_WEB_CONSOLE_BIND}"
+    lport="$(xdr_web_console_listen_port "$vm")"
+    mkdir -p "${XDR_LAB_WEB_CONSOLE_DIR}"
+
+    if [[ -z "$ws_bin" ]]; then
+      log_structured "ERROR" "web_console_service_failed vm=${vm} reason=websockify_missing"
+      echo "web-console service: websockify not found" >&2
+      return 1
+    fi
+    if [[ -z "$webroot" ]]; then
+      log_structured "ERROR" "web_console_service_failed vm=${vm} reason=novnc_missing"
+      echo "web-console service: noVNC webroot not found" >&2
+      return 1
+    fi
+    if [[ -z "$vnc_port" ]]; then
+      xdr_qemu_vnc_diagnostics "$vm"
+      log_structured "WARN" "web_console_service_wait vm=${vm} reason=vnc_port_unknown retry=${retry}"
+      sleep "$retry"
+      continue
+    fi
+    if ! xdr_tcp_open_local 127.0.0.1 "$vnc_port" 1.0; then
+      log_structured "WARN" "web_console_service_wait vm=${vm} reason=vnc_target_closed target=127.0.0.1:${vnc_port} retry=${retry}"
+      echo "web-console service: QEMU VNC target 127.0.0.1:${vnc_port} is not listening; retrying in ${retry}s" >&2
+      sleep "$retry"
+      continue
+    fi
+
+    old_pid="$(xdr_vnc_manifest_read_field "$mf" websockify_pid)"
+    if [[ -n "$old_pid" && "$old_pid" != "$$" ]] && xdr_pid_alive "$old_pid"; then
+      kill "$old_pid" 2>/dev/null || true
+      log_structured "INFO" "web_console_service_replaced_old_pid vm=${vm} pid=${old_pid}"
+    fi
+
+    python3 - "$vm" "$$" "$bind" "$lport" "127.0.0.1" "$vnc_port" "$webroot" "$mf" "$vnc_disp" "$novnc_src" <<'PY'
+import json, sys, datetime
+from pathlib import Path
+vm, pid, bind, lport, thost, tport, webroot, mf, vnc_disp, novnc_src = sys.argv[1:11]
+rec = {
+    "vm": vm,
+    "websockify_pid": int(pid),
+    "listen_bind": bind,
+    "listen_port": int(lport),
+    "target_host": thost,
+    "target_port": int(tport),
+    "vnc_display": vnc_disp,
+    "webroot": webroot,
+    "novnc_source": novnc_src,
+    "started_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "systemd_service": True,
+}
+Path(mf).parent.mkdir(parents=True, exist_ok=True)
+Path(mf).write_text(json.dumps(rec, indent=2) + "\n", encoding="utf-8")
+PY
+    log_structured "INFO" "web_console_service_exec vm=${vm} listen=${bind}:${lport} target=127.0.0.1:${vnc_port}"
+    exec "${ws_bin}" --web "${webroot}" "${bind}:${lport}" "127.0.0.1:${vnc_port}"
+  done
+}
+
 web_console_stop() {
   local vm="${1:-windows-victim}"
   local mf pid
@@ -526,31 +767,35 @@ web_console_stop() {
 
 web_console_status() {
   local vm="${1:-windows-victim}"
-  local mf pid lport webroot vnc_disp vnc_port bind ext_ip listen_url
+  local mf pid lport webroot vnc_disp vnc_port live_vnc_port bind unit vm_state listen_socket
   mf="$(xdr_web_console_manifest_path "$vm")"
   pid="$(xdr_vnc_manifest_read_field "$mf" websockify_pid)"
   lport="$(xdr_web_console_listen_port "$vm")"
   bind="${XDR_LAB_WEB_CONSOLE_BIND}"
+  unit="$(xdr_web_console_unit_name "$vm")"
+  vm_state="$(virsh domstate "$vm" 2>/dev/null | tr -d '\r' || true)"
   vnc_disp="$(xdr_virsh_vncdisplay_raw "$vm" 2>/dev/null || true)"
-  vnc_port="$(xdr_windows_vnc_listen_port "$vm")"
-  ext_ip="$(xdr_primary_ipv4 2>/dev/null || true)"
-  listen_url="http://127.0.0.1:${lport}/"
-  if [[ -n "$ext_ip" ]]; then
-    listen_url="http://${ext_ip}:${lport}/ (also ${listen_url})"
-  fi
+  live_vnc_port="$(xdr_windows_vnc_listen_port "$vm")"
+  vnc_port="$(xdr_web_console_target_port "$vm")"
+  listen_socket="$(xdr_web_console_listen_socket "$lport")"
   echo "Windows web console (noVNC/websockify) — ${vm}"
   web_console_component_probe
-  echo "  VM: ${vm}"
+  echo "  VM name: ${vm}"
+  echo "  VM state: ${vm_state:-unknown}"
   echo "  VNC display: ${vnc_disp:-<unknown>}"
-  echo "  resolved TCP port: ${vnc_port:-<unknown>}"
+  echo "  live QEMU VNC port: ${live_vnc_port:-<unknown>}"
+  echo "  QEMU VNC target: 127.0.0.1:${vnc_port:-<unknown>}"
+  echo "  Web console URL: http://127.0.0.1:${lport}/vnc.html"
+  echo "  systemd unit: ${unit}"
+  echo "  systemd unit state: $(xdr_web_console_systemd_state "$unit")"
   echo "  manifest: ${mf}"
-  echo "  websockify_pid: ${pid:-<none>}"
+  echo "  websockify PID: ${pid:-<none>}"
   if [[ -n "$pid" ]] && xdr_pid_alive "$pid"; then
     echo "  websockify process: running"
   else
     echo "  websockify process: stopped"
   fi
-  echo "  listen URL: ${listen_url}"
+  echo "  listen socket: ${listen_socket}"
   echo "  listen: ${bind}:${lport} -> 127.0.0.1:${vnc_port:-<qemu-vnc>}"
   if webroot="$(xdr_find_novnc_webroot 2>/dev/null)"; then
     echo "  novnc vnc.html: present (${webroot})"
@@ -562,16 +807,17 @@ web_console_status() {
 web_console_verify() {
   local vm="${1:-windows-victim}"
   require_cmd virsh
-  local mf pid st live_int lport ext_ip
+  local mf pid st live_int lport ext_ip bind
   st="$(virsh domstate "$vm" 2>/dev/null | tr -d '\r' || true)"
   mf="$(xdr_web_console_manifest_path "$vm")"
   pid="$(xdr_vnc_manifest_read_field "$mf" websockify_pid)"
-  live_int="$(xdr_windows_vnc_listen_port "$vm")"
+  live_int="$(xdr_web_console_target_port "$vm")"
   lport="$(xdr_web_console_listen_port "$vm")"
   ext_ip="$(xdr_primary_ipv4 2>/dev/null || true)"
+  bind="${XDR_LAB_WEB_CONSOLE_BIND}"
   log_structured "INFO" "web_console_verify vm=${vm} domstate=${st:-unknown} internal_vnc_port=${live_int:-} websockify_pid=${pid:-}"
 
-  python3 - "$mf" "$pid" "$live_int" "$lport" "$st" "$ext_ip" <<'PY'
+  python3 - "$mf" "$pid" "$live_int" "$lport" "$st" "$ext_ip" "$bind" <<'PY'
 import json, socket, sys, os, datetime
 from pathlib import Path
 
@@ -619,7 +865,7 @@ def pid_running(p):
         return False
     return True
 
-mf, pid_s, live_s, lport_s, st, ext_arg = sys.argv[1:7]
+mf, pid_s, live_s, lport_s, st, ext_arg, bind = sys.argv[1:8]
 pid = int(pid_s) if str(pid_s).strip().isdigit() else None
 live_int = int(live_s) if str(live_s).strip().isdigit() else None
 lport = int(lport_s)
@@ -661,7 +907,8 @@ else:
     if not tcp_open("127.0.0.1", lport):
         ok = False
         reasons.append("listen_tcp_closed")
-    if ext_ip and not tcp_open(ext_ip, lport):
+    exposes_off_host = bind in ("0.0.0.0", "::", "[::]")
+    if exposes_off_host and ext_ip and not tcp_open(ext_ip, lport):
         ok = False
         reasons.append("external_web_console_tcp_closed")
 
@@ -684,15 +931,54 @@ sys.exit(0 if ok else 1)
 PY
 }
 
+web_console_service_action() {
+  local action="$1" vm="${2:-windows-victim}" unit rc
+  unit="$(xdr_web_console_unit_name "$vm")"
+  if ! xdr_systemctl_available; then
+    die "systemd is not available; cannot ${action} ${unit}"
+  fi
+  case "$action" in
+    start) systemctl start "$unit" ;;
+    stop)
+      systemctl stop "$unit"
+      rc=$?
+      rm -f "$(xdr_web_console_manifest_path "$vm")" 2>/dev/null || true
+      return "$rc"
+      ;;
+    enable) systemctl enable "$unit" ;;
+    disable) systemctl disable "$unit" ;;
+    *) return 2 ;;
+  esac
+}
+
 web_console_dispatch() {
   local sub="${1:-}" vm="${2:-windows-victim}"
   case "${sub}" in
-    start) web_console_start "$vm" ;;
-    stop) web_console_stop "$vm" ;;
+    start)
+      local unit
+      unit="$(xdr_web_console_unit_name "$vm")"
+      if xdr_systemctl_available && xdr_web_console_unit_installed "$unit"; then
+        web_console_service_action start "$vm"
+      else
+        web_console_start "$vm"
+      fi
+      ;;
+    stop)
+      local unit
+      unit="$(xdr_web_console_unit_name "$vm")"
+      if xdr_systemctl_available && xdr_web_console_unit_installed "$unit"; then
+        web_console_service_action stop "$vm"
+      else
+        web_console_stop "$vm"
+      fi
+      ;;
     status) web_console_status "$vm" ;;
     verify) web_console_verify "$vm" ;;
+    enable) web_console_service_action enable "$vm" ;;
+    disable) web_console_service_action disable "$vm" ;;
+    serve) web_console_serve "$vm" ;;
     *)
-      echo "Usage: $(basename "$0") web-console <start|stop|status|verify> [vm]" >&2
+      echo "Usage: $(basename "$0") web-console <start|stop|status|enable|disable|verify> [vm]" >&2
       return 2
       ;;
   esac

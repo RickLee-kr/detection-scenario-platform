@@ -124,10 +124,13 @@ LINUX_SERVER_SSH_VALIDATED_USER=""
 : "${XDR_LAB_VNC_EXTERNAL_PORT:=15900}"
 : "${XDR_LAB_VNC_PROXY_BIND:=0.0.0.0}"
 
-# Windows VM browser console — websockify (0.0.0.0:6080) -> 127.0.0.1:QEMU-VNC + noVNC static UI.
+# Windows VM browser console — websockify (127.0.0.1:6080) -> 127.0.0.1:QEMU-VNC + noVNC static UI.
 : "${XDR_LAB_WEB_CONSOLE_DIR:=${XDR_RUNTIME_DIR}/web-console}"
 : "${XDR_LAB_WEB_CONSOLE_PORT:=6080}"
-: "${XDR_LAB_WEB_CONSOLE_BIND:=0.0.0.0}"
+: "${XDR_LAB_WEB_CONSOLE_BIND:=127.0.0.1}"
+: "${XDR_LAB_WEB_CONSOLE_RETRY_SECS:=10}"
+: "${XDR_LAB_WINDOWS_VICTIM_VNC_PORT:=5902}"
+: "${XDR_LAB_WINDOWS_VICTIM_VNC_DISPLAY:=:2}"
 
 _XDR_RUNTIME_ENV_READY=0
 _XDR_READONLY_CLI=0
@@ -1909,7 +1912,12 @@ deploy_windows_vm() {
     autostart_flag=(--autostart)
   fi
 
-  log_structured "INFO" "windows_virt_install_begin vm=${vm} libvirt_network=${LAB_OVS_NETWORK} uefi=1 net=${netm}"
+  local graphics_arg="vnc,listen=127.0.0.1"
+  if [[ "$vm" == "windows-victim" ]]; then
+    graphics_arg="vnc,listen=127.0.0.1,port=${XDR_LAB_WINDOWS_VICTIM_VNC_PORT},autoport=no"
+  fi
+
+  log_structured "INFO" "windows_virt_install_begin vm=${vm} libvirt_network=${LAB_OVS_NETWORK} uefi=1 net=${netm} graphics=${graphics_arg}"
   if ! virt_install_libvirt_network "${netm}" \
     --name "$vm" \
     --memory "$mem" \
@@ -1918,7 +1926,7 @@ deploy_windows_vm() {
     --import \
     --os-variant "$osv" \
     --virt-type kvm \
-    --graphics "vnc,listen=127.0.0.1" \
+    --graphics "${graphics_arg}" \
     --boot "loader=${ovmf_code},nvram=${nvram},loader.readonly=yes,loader.type=pflash" \
     --noautoconsole \
     "${autostart_flag[@]}"; then
@@ -4058,6 +4066,7 @@ Examples:
   xdr-lab-vm-manager.sh deploy sensor-vm --cpus 4 --memory-mb 6144 --disk-gb 80
   xdr-lab-vm-manager.sh deploy windows-victim
   xdr-lab-vm-manager.sh windows-console windows-victim
+  xdr-lab-vm-manager.sh web-console enable windows-victim
   xdr-lab-vm-manager.sh web-console start windows-victim
   xdr-lab-vm-manager.sh web-console status windows-victim
   xdr-lab-vm-manager.sh vnc-proxy start windows-victim
@@ -4130,7 +4139,7 @@ Notes:
   XDR_LAB_VNC_EXTERNAL_PORT / XDR_LAB_VNC_PROXY_DIR / XDR_LAB_VNC_PROXY_BIND (defaults in config/paths.sh)
   XDR_LAB_WEB_CONSOLE_PORT / XDR_LAB_WEB_CONSOLE_DIR / XDR_LAB_WEB_CONSOLE_BIND
   Emergency VNC: QEMU listens on 127.0.0.1 only; host socat forwards XDR_LAB_VNC_EXTERNAL_PORT -> localhost VNC.
-  Web console: websockify listens on XDR_LAB_WEB_CONSOLE_BIND:PORT (default 0.0.0.0:6080) with --web noVNC -> 127.0.0.1:QEMU-VNC.
+  Web console: websockify listens on XDR_LAB_WEB_CONSOLE_BIND:PORT (default 127.0.0.1:6080) with --web noVNC -> 127.0.0.1:QEMU-VNC.
   Optional host packages: see installer/lab-host-web-console-deps.sh (novnc, websockify).
 EOF
 }
