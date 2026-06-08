@@ -1,0 +1,89 @@
+manifest_schema_version: "1.0.0"
+id: dns_dummy
+name: DNS Dummy — Protocol Foundation Verification
+version: "1.0.0"
+description: >
+  Exercises the reusable DNS protocol layer with mock/dry-run queries only.
+  NOT DNS Tunnel — validates Core Platform + DNS Protocol integration.
+
+category: dns
+tags: [phase_1b, dns, dry_run, protocol_foundation]
+enabled: true
+
+supported_targets:
+  requires: [dns_resolver]
+  optional: [alive_host]
+  max_hosts: 1
+
+supported_protocols: [dns_udp]
+
+validation_profile:
+  profile_version: "1.0.0"
+  metrics:
+    - name: dns_query_sent_count
+      event_filter:
+        event: dns_query_sent
+        status: sent
+      aggregate: count
+    - name: dns_response_count
+      event_filter:
+        event: dns_response_received
+        status: response
+      aggregate: count
+    - name: dns_nxdomain_count
+      event_filter:
+        event: dns_response_received
+        status: nxdomain
+      aggregate: count
+    - name: dns_timeout_count
+      event_filter:
+        event: dns_timeout
+        status: timeout
+      aggregate: count
+    - name: dns_error_count
+      event_filter:
+        event: dns_error
+        status: error
+      aggregate: count
+  success:
+    dns_query_sent_count:
+      min: 3
+    dns_response_count:
+      min: 3
+  fail_fast:
+    - SOT_EMPTY_AFTER_EXECUTE
+
+report_profile:
+  profile_version: "1.0.0"
+  protocol: dns
+  highlight_metrics:
+    - dns_query_sent_count
+    - dns_response_count
+    - dns_nxdomain_count
+    - dns_timeout_count
+    - dns_error_count
+  sample_events: 5
+  sample_filter:
+    event: dns_query_sent
+
+defaults:
+  query_count: 5
+  resolver: "10.10.10.20"
+
+safety:
+  max_events: 200
+  max_duration_sec: 120
+  allowed_domains: [lab.example]
+  allowed_ports: [53]
+  forbidden_actions: []
+  target_net_enforced: true
+
+requirements:
+  dsp_min_version: "1.0.0"
+  python_min_version: "3.11"
+
+executor:
+  module: executor
+  entrypoint: run
+  remote_capable: false
+  dry_run_supported: true

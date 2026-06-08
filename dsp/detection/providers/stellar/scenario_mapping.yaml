@@ -1,0 +1,125 @@
+# Externalized scenario → Stellar detection mapping.
+# Loaded by stellar_mapping.py — do NOT hardcode in adapter logic.
+
+version: "1.0.0"
+vendor: stellar
+
+scenarios:
+  dns_tunnel:
+    detection_model_id: stellar.dns_tunnel
+    alert_families:
+      - DNS Tunnel
+      - DNS Exfiltration
+    analytics_types:
+      - dns_query_volume_anomaly
+      - long_subdomain_pattern
+    correlation:
+      protocol: dns
+      required_artifact_prefix: idx-
+      entity_roles:
+        - source_ip
+        - resolver_ip
+
+  dga:
+    detection_model_id: stellar.dga
+    alert_families:
+      - DGA
+      - Domain Generation Algorithm
+    analytics_types:
+      - nxdomain_burst
+      - dga_domain_entropy
+    correlation:
+      protocol: dns
+      entity_roles:
+        - source_ip
+
+  http_followup:
+    detection_model_id: stellar.http_recon
+    alert_families:
+      - HTTP Reconnaissance
+      - Suspicious HTTP Activity
+    analytics_types:
+      - http_path_enumeration
+    correlation:
+      protocol: http
+      entity_roles:
+        - source_ip
+        - destination_ip
+
+  ssh_failure:
+    detection_model_id: stellar.ssh_login_failure
+    alert_families:
+      - SSH Login Failure
+      - Brute Force SSH
+    analytics_types:
+      - ssh_auth_failure_burst
+    correlation:
+      protocol: ssh
+      entity_roles:
+        - source_ip
+        - destination_ip
+
+  smb_login_failure:
+    detection_model_id: stellar.smb_login_failure
+    alert_families:
+      - SMB Authentication Failure
+      - SMB Bad Auth
+    analytics_types:
+      - smb_auth_failure_burst
+    correlation:
+      protocol: smb
+      entity_roles:
+        - source_ip
+        - destination_ip
+
+  sql_injection:
+    detection_model_id: stellar.sql_injection
+    alert_families:
+      - SQL Injection
+      - Web Attack SQLi
+    analytics_types:
+      - sqli_payload_detected
+    correlation:
+      protocol: http
+      entity_roles:
+        - source_ip
+        - destination_ip
+
+  port_sweep:
+    detection_model_id: stellar.port_sweep
+    alert_families:
+      - Port Sweep
+      - Horizontal Port Scan
+    analytics_types:
+      - port_scan_burst
+    correlation:
+      protocol: tcp
+      entity_roles:
+        - source_ip
+        - destination_ip
+
+  ldap_enumeration:
+    detection_model_id: stellar.ldap_enumeration
+    alert_families:
+      - LDAP Enumeration
+      - LDAP Anonymous Bind
+    analytics_types:
+      - ldap_query_burst
+    correlation:
+      protocol: ldap
+      entity_roles:
+        - source_ip
+        - destination_ip
+
+  kerberos_failure:
+    detection_model_id: stellar.kerberos_failure
+    alert_families:
+      - Kerberos Authentication Failure
+      - Kerberos Anomaly
+    analytics_types:
+      - kerberos_auth_failure_burst
+    correlation:
+      protocol: kerberos
+      entity_roles:
+        - source_ip
+        - destination_ip

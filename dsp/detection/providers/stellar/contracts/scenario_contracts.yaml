@@ -1,0 +1,302 @@
+# Stellar Detection Contract Layer — scenario contracts (Phase 10).
+# Loaded by contracts/contract_loader.py — do NOT hardcode in adapter logic.
+
+version: "1.0.0"
+vendor: stellar
+
+scenarios:
+  dns_tunnel:
+    category: DNS Tunnel
+    confidence: HIGH
+    search_window_minutes: 30
+    detection_model_id: stellar.dns_tunnel
+    required_evidence:
+      - alert
+      - analytics
+      - entity
+    optional_evidence:
+      - timeline
+    alert_families:
+      - DNS Tunnel
+      - DNS Exfiltration
+    entity_types:
+      - ip
+      - host
+      - domain
+    analytics_types:
+      - dns_query_volume_anomaly
+      - long_subdomain_pattern
+    query_dimensions:
+      source_ip: required
+      destination_ip: optional
+      hostname: required
+      username: nice_to_have
+      protocol: required
+      port: required
+      time_range: required
+    fallback:
+      missing_source_ip: widen_time_window_and_entity_only
+      missing_hostname: use_protocol_and_time_only
+      empty_alerts: rely_on_analytics_and_entities
+
+  dga:
+    category: DGA
+    confidence: HIGH
+    search_window_minutes: 30
+    detection_model_id: stellar.dga
+    required_evidence:
+      - alert
+      - analytics
+    optional_evidence:
+      - entity
+      - timeline
+    alert_families:
+      - DGA
+      - Domain Generation Algorithm
+    entity_types:
+      - ip
+      - domain
+    analytics_types:
+      - nxdomain_burst
+      - dga_domain_entropy
+    query_dimensions:
+      source_ip: required
+      destination_ip: optional
+      hostname: required
+      username: nice_to_have
+      protocol: required
+      port: required
+      time_range: required
+    fallback:
+      missing_source_ip: widen_time_window
+      missing_hostname: use_analytics_type_filter
+      empty_alerts: rely_on_analytics_only
+
+  http_followup:
+    category: HTTP Reconnaissance
+    confidence: HIGH
+    search_window_minutes: 15
+    detection_model_id: stellar.http_recon
+    required_evidence:
+      - alert
+      - analytics
+    optional_evidence:
+      - entity
+      - timeline
+    alert_families:
+      - HTTP Reconnaissance
+      - Suspicious HTTP Activity
+    entity_types:
+      - ip
+      - host
+      - url
+    analytics_types:
+      - http_path_enumeration
+    query_dimensions:
+      source_ip: required
+      destination_ip: required
+      hostname: optional
+      username: nice_to_have
+      protocol: required
+      port: optional
+      time_range: required
+    fallback:
+      missing_destination_ip: source_ip_and_time_only
+      missing_hostname: use_ip_pair_and_protocol
+      empty_analytics: rely_on_alerts_and_entities
+
+  ssh_failure:
+    category: SSH Login Failure
+    confidence: HIGH
+    search_window_minutes: 30
+    detection_model_id: stellar.ssh_login_failure
+    required_evidence:
+      - alert
+      - analytics
+      - entity
+    optional_evidence:
+      - timeline
+    alert_families:
+      - SSH Login Failure
+      - Brute Force SSH
+    entity_types:
+      - ip
+      - host
+      - user
+    analytics_types:
+      - ssh_auth_failure_burst
+    query_dimensions:
+      source_ip: required
+      destination_ip: required
+      hostname: optional
+      username: required
+      protocol: required
+      port: required
+      time_range: required
+    fallback:
+      missing_username: use_ip_pair_and_auth_failure_analytics
+      missing_source_ip: destination_ip_and_time_only
+      empty_entities: rely_on_alerts_and_analytics
+
+  smb_login_failure:
+    category: SMB Authentication Failure
+    confidence: HIGH
+    search_window_minutes: 30
+    detection_model_id: stellar.smb_login_failure
+    required_evidence:
+      - alert
+      - entity
+    optional_evidence:
+      - analytics
+      - timeline
+    alert_families:
+      - SMB Authentication Failure
+      - SMB Bad Auth
+    entity_types:
+      - ip
+      - host
+      - user
+    analytics_types:
+      - smb_auth_failure_burst
+    query_dimensions:
+      source_ip: required
+      destination_ip: required
+      hostname: optional
+      username: required
+      protocol: required
+      port: required
+      time_range: required
+    fallback:
+      missing_username: use_ip_pair_and_auth_failure_analytics
+      missing_source_ip: destination_ip_and_time_only
+      empty_entities: rely_on_alerts_and_analytics
+
+  kerberos_failure:
+    category: Kerberos Authentication Failure
+    confidence: HIGH
+    search_window_minutes: 30
+    detection_model_id: stellar.kerberos_failure
+    required_evidence:
+      - alert
+      - entity
+    optional_evidence:
+      - analytics
+      - timeline
+    alert_families:
+      - Kerberos Authentication Failure
+      - Kerberos Anomaly
+    entity_types:
+      - ip
+      - host
+      - user
+    analytics_types:
+      - kerberos_auth_failure_burst
+    query_dimensions:
+      source_ip: required
+      destination_ip: required
+      hostname: optional
+      username: required
+      protocol: required
+      port: required
+      time_range: required
+    fallback:
+      missing_username: use_ip_pair_and_auth_failure_analytics
+      missing_source_ip: destination_ip_and_time_only
+      empty_entities: rely_on_alerts_and_analytics
+
+  sql_injection:
+    category: SQL Injection
+    confidence: HIGH
+    search_window_minutes: 15
+    detection_model_id: stellar.sql_injection
+    required_evidence:
+      - alert
+      - analytics
+    optional_evidence:
+      - entity
+      - timeline
+    alert_families:
+      - SQL Injection
+      - Web Attack SQLi
+    entity_types:
+      - ip
+      - host
+      - url
+    analytics_types:
+      - sqli_payload_detected
+    query_dimensions:
+      source_ip: required
+      destination_ip: required
+      hostname: optional
+      username: nice_to_have
+      protocol: required
+      port: optional
+      time_range: required
+    fallback:
+      missing_destination_ip: source_ip_and_time_only
+      empty_alerts: rely_on_analytics_with_payload_match
+      missing_hostname: use_ip_pair_and_http_protocol
+
+  port_sweep:
+    category: Port Sweep
+    confidence: HIGH
+    search_window_minutes: 30
+    detection_model_id: stellar.port_sweep
+    required_evidence:
+      - alert
+      - entity
+    optional_evidence:
+      - analytics
+      - timeline
+    alert_families:
+      - Port Sweep
+      - Horizontal Port Scan
+    entity_types:
+      - ip
+      - host
+    analytics_types:
+      - port_scan_burst
+    query_dimensions:
+      source_ip: required
+      destination_ip: required
+      hostname: optional
+      username: nice_to_have
+      protocol: required
+      port: required
+      time_range: required
+    fallback:
+      missing_destination_ip: source_ip_and_time_only
+      missing_hostname: use_ip_pair_and_protocol
+      empty_analytics: rely_on_alerts_and_entities
+
+  ldap_enumeration:
+    category: LDAP Enumeration
+    confidence: MEDIUM
+    search_window_minutes: 30
+    detection_model_id: stellar.ldap_enumeration
+    required_evidence:
+      - alert
+      - entity
+    optional_evidence:
+      - analytics
+      - timeline
+    alert_families:
+      - LDAP Enumeration
+      - LDAP Anonymous Bind
+    entity_types:
+      - ip
+      - host
+    analytics_types:
+      - ldap_query_burst
+    query_dimensions:
+      source_ip: required
+      destination_ip: required
+      hostname: optional
+      username: nice_to_have
+      protocol: required
+      port: required
+      time_range: required
+    fallback:
+      missing_destination_ip: source_ip_and_time_only
+      missing_hostname: use_ip_pair_and_protocol
+      empty_analytics: rely_on_alerts_and_entities

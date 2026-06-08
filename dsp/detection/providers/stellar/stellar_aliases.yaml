@@ -1,0 +1,38 @@
+# Stellar vendor field aliases → DSP normalized field names (Phase 11).
+# Loaded by normalization.py — missing aliases must not crash normalization.
+
+version: "1.0.0"
+vendor: stellar
+
+# Canonical DSP field → vendor alias keys (first match wins).
+fields:
+  id:
+    aliases: [id, alert_id, incident_id, entity_id, event_id, _id]
+  alert_name:
+    aliases: [name, alert_name, title, alert_title]
+  severity:
+    aliases: [severity, risk_level, priority]
+  observed_at:
+    aliases: [observed_at, timestamp, event_time, created_at, detected_at, time]
+  analytic_type:
+    aliases: [analytic_type, type, analytics_type, rule_type]
+  summary:
+    aliases: [summary, description, message, detail]
+  entity_type:
+    aliases: [entity_type, type, object_type]
+  entity_value:
+    aliases: [entity_value, value, ip, hostname, domain, url]
+  role:
+    aliases: [role, entity_role, direction]
+  event_type:
+    aliases: [event_type, type, action]
+  description:
+    aliases: [description, summary, message, detail]
+  detection_model_id:
+    aliases: [detection_model_id, model_id, rule_id, detection_id]
+  source_ip:
+    aliases: [source_ip, src_ip, srcip, src, client_ip, source]
+  destination_ip:
+    aliases: [destination_ip, dst_ip, dstip, dst, target_ip, destination]
+  entity_refs:
+    aliases: [entity_refs, entities, related_entities, refs]

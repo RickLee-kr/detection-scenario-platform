@@ -1,0 +1,99 @@
+manifest_schema_version: "1.0.0"
+id: ldap_enumeration
+name: LDAP Enumeration — Safe Directory Discovery Activity
+version: "1.0.0"
+description: >
+  Generates detectable LDAP enumeration-like activity across up to 5 hosts.
+  Controlled anonymous or intentionally failed bind/search attempts only.
+  No credential theft, data extraction, password spraying, or exploitation.
+
+category: identity
+tags: [phase_15, ldap, enumeration, discovery, ndr, xdr, siem]
+enabled: true
+
+supported_targets:
+  requires: [alive_host]
+  optional: [domain_controller]
+  max_hosts: 5
+
+supported_protocols: [ldap]
+
+validation_profile:
+  profile_version: "1.0.0"
+  metrics:
+    - name: ldap_connection_attempt_count
+      event_filter:
+        event: ldap_connection_attempt
+        status: sent
+      aggregate: count
+    - name: ldap_bind_attempt_count
+      event_filter:
+        event: ldap_bind_attempt
+        status: sent
+      aggregate: count
+    - name: ldap_search_attempt_count
+      event_filter:
+        event: ldap_search_attempt
+        status: sent
+      aggregate: count
+    - name: ldap_bind_or_search_attempt_count
+      event_filter:
+        event:
+          - ldap_bind_attempt
+          - ldap_search_attempt
+        status: sent
+      aggregate: count
+    - name: ldap_bind_failed_count
+      event_filter:
+        event: ldap_bind_failed
+      aggregate: count
+    - name: ldap_search_failed_count
+      event_filter:
+        event: ldap_search_failed
+      aggregate: count
+  success:
+    ldap_connection_attempt_count:
+      min: 1
+    ldap_bind_or_search_attempt_count:
+      min: 1
+  fail_fast:
+    - SOT_EMPTY_AFTER_EXECUTE
+
+report_profile:
+  profile_version: "1.0.0"
+  protocol: ldap_enumeration
+  highlight_metrics:
+    - ldap_connection_attempt_count
+    - ldap_bind_attempt_count
+    - ldap_search_attempt_count
+    - ldap_bind_or_search_attempt_count
+    - ldap_bind_failed_count
+    - ldap_search_failed_count
+  sample_events: 5
+  sample_filter:
+    event: ldap_search_attempt
+
+defaults:
+  max_hosts: 5
+  max_queries_per_host: 10
+  ports: [389, 636]
+  timeout: 5.0
+  safe_mode: true
+
+safety:
+  max_events: 1000
+  max_duration_sec: 300
+  allowed_domains: []
+  allowed_ports: [389, 636]
+  forbidden_actions: [credential_theft, data_extraction, password_spraying, exploitation]
+  target_net_enforced: true
+
+requirements:
+  dsp_min_version: "1.0.0"
+  python_min_version: "3.11"
+
+executor:
+  module: executor
+  entrypoint: run
+  remote_capable: false
+  dry_run_supported: true

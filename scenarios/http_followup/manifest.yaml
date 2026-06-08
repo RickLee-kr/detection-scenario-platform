@@ -1,0 +1,71 @@
+manifest_schema_version: "1.0.0"
+id: http_followup
+name: HTTP Follow-up — Fixed Path Web Access
+version: "1.0.0"
+description: >
+  Generates detectable HTTP access activity using fixed paths across up to 2 hosts.
+  Max 10 requests per host, 20 requests total. Not a vulnerability scanner.
+
+category: web
+tags: [phase_4, http, followup, ndr, waf]
+enabled: true
+
+supported_targets:
+  requires: [alive_host]
+  optional: [http_host, https_host]
+  max_hosts: 2
+
+supported_protocols: [http, https]
+
+validation_profile:
+  profile_version: "1.0.0"
+  metrics:
+    - name: http_request_sent_count
+      event_filter:
+        event: http_request_sent
+        status: sent
+      aggregate: count
+    - name: http_response_received_count
+      event_filter:
+        event: http_response_received
+        status: response
+      aggregate: count
+  success:
+    http_request_sent_count:
+      min: 1
+  fail_fast:
+    - SOT_EMPTY_AFTER_EXECUTE
+
+report_profile:
+  profile_version: "1.0.0"
+  protocol: http_followup
+  highlight_metrics:
+    - http_request_sent_count
+    - http_response_received_count
+  sample_events: 5
+  sample_filter:
+    event: http_request_sent
+
+defaults:
+  max_hosts: 2
+  max_per_host: 10
+  max_total: 20
+  timeout: 10.0
+
+safety:
+  max_events: 500
+  max_duration_sec: 300
+  allowed_domains: []
+  allowed_ports: [443, 8443, 80, 8080, 8000]
+  forbidden_actions: []
+  target_net_enforced: true
+
+requirements:
+  dsp_min_version: "1.0.0"
+  python_min_version: "3.11"
+
+executor:
+  module: executor
+  entrypoint: run
+  remote_capable: false
+  dry_run_supported: true

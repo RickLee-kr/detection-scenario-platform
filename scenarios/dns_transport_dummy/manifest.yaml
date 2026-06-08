@@ -1,0 +1,87 @@
+manifest_schema_version: "1.0.0"
+id: dns_transport_dummy
+name: DNS Transport Dummy — Live UDP/53 Verification
+version: "1.0.0"
+description: >
+  Validates Core Platform + DNS Protocol Layer + real UDP/53 transport.
+  NOT DNS Tunnel — sends actual DNS queries and records transport events.
+
+category: dns
+tags: [phase_2a, dns, live_transport, protocol_foundation]
+enabled: true
+
+supported_targets:
+  requires: [dns_resolver]
+  optional: [alive_host]
+  max_hosts: 1
+
+supported_protocols: [dns_udp]
+
+validation_profile:
+  profile_version: "1.0.0"
+  metrics:
+    - name: dns_query_sent_count
+      event_filter:
+        event: dns_query_sent
+        status: sent
+      aggregate: count
+    - name: dns_response_count
+      event_filter:
+        event: dns_response_received
+        status: response
+      aggregate: count
+    - name: dns_nxdomain_count
+      event_filter:
+        event: dns_response_received
+        status: nxdomain
+      aggregate: count
+    - name: dns_timeout_count
+      event_filter:
+        event: dns_timeout
+        status: timeout
+      aggregate: count
+    - name: dns_error_count
+      event_filter:
+        event: dns_error
+        status: error
+      aggregate: count
+  success:
+    dns_query_sent_count:
+      min: 1
+  fail_fast:
+    - SOT_EMPTY_AFTER_EXECUTE
+
+report_profile:
+  profile_version: "1.0.0"
+  protocol: dns
+  highlight_metrics:
+    - dns_query_sent_count
+    - dns_response_count
+    - dns_nxdomain_count
+    - dns_timeout_count
+    - dns_error_count
+  sample_events: 5
+  sample_filter:
+    event: dns_query_sent
+
+defaults:
+  query_count: 1
+  resolver: "10.10.10.20"
+
+safety:
+  max_events: 50
+  max_duration_sec: 60
+  allowed_domains: [lab.example]
+  allowed_ports: [53]
+  forbidden_actions: []
+  target_net_enforced: true
+
+requirements:
+  dsp_min_version: "1.0.0"
+  python_min_version: "3.11"
+
+executor:
+  module: executor
+  entrypoint: run
+  remote_capable: false
+  dry_run_supported: true

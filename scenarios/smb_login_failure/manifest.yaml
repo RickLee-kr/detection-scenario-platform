@@ -1,0 +1,75 @@
+manifest_schema_version: "1.0.0"
+id: smb_login_failure
+name: SMB Login Failure — Authentication Failure Activity
+version: "1.0.0"
+description: >
+  Generates detectable SMB authentication failure activity across up to 5 hosts.
+  Default 10 attempts per host. Safe mode enabled — no valid credentials, no brute-force,
+  no credential harvesting. Controlled failed authentication only.
+
+category: auth
+tags: [phase_13, smb, auth_failure, ndr, identity]
+enabled: true
+
+supported_targets:
+  requires: [alive_host]
+  optional: [windows_host, smb_host]
+  max_hosts: 5
+
+supported_protocols: [smb]
+
+validation_profile:
+  profile_version: "1.0.0"
+  metrics:
+    - name: smb_auth_attempt_count
+      event_filter:
+        event: smb_auth_attempt
+        status: sent
+      aggregate: count
+    - name: smb_auth_failed_count
+      event_filter:
+        event: smb_auth_failed
+        status: auth_failed
+      aggregate: count
+  success:
+    smb_auth_attempt_count:
+      min: 1
+    smb_auth_failed_count:
+      min: 1
+  fail_fast:
+    - SOT_EMPTY_AFTER_EXECUTE
+
+report_profile:
+  profile_version: "1.0.0"
+  protocol: smb_login_failure
+  highlight_metrics:
+    - smb_auth_attempt_count
+    - smb_auth_failed_count
+  sample_events: 5
+  sample_filter:
+    event: smb_auth_attempt
+
+defaults:
+  max_hosts: 5
+  attempts_per_host: 10
+  port: 445
+  timeout: 10.0
+  safe_mode: true
+
+safety:
+  max_events: 500
+  max_duration_sec: 300
+  allowed_domains: []
+  allowed_ports: [445, 139]
+  forbidden_actions: [privilege_escalation, valid_credential_use, brute_force, credential_harvesting]
+  target_net_enforced: true
+
+requirements:
+  dsp_min_version: "1.0.0"
+  python_min_version: "3.11"
+
+executor:
+  module: executor
+  entrypoint: run
+  remote_capable: false
+  dry_run_supported: true

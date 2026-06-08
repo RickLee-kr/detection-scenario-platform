@@ -1,0 +1,75 @@
+manifest_schema_version: "1.0.0"
+id: ssh_failure
+name: SSH Login Failure — Authentication Failure Activity
+version: "1.0.0"
+description: >
+  Generates detectable SSH authentication failure activity across up to 2 hosts.
+  Default 30 attempts per host, 60 attempts total. Safe pubkey-only attempts with
+  dummy password labels in evidence only. Not a brute-force engine.
+
+category: auth
+tags: [phase_5, ssh, auth_failure, ndr, identity]
+enabled: true
+
+supported_targets:
+  requires: [alive_host]
+  optional: [ssh_host, linux_host]
+  max_hosts: 2
+
+supported_protocols: [ssh]
+
+validation_profile:
+  profile_version: "1.0.0"
+  metrics:
+    - name: ssh_auth_attempt_count
+      event_filter:
+        event: ssh_auth_attempt
+        status: sent
+      aggregate: count
+    - name: ssh_auth_failed_count
+      event_filter:
+        event: ssh_auth_failed
+        status: auth_failed
+      aggregate: count
+  success:
+    ssh_auth_attempt_count:
+      min: 1
+    ssh_auth_failed_count:
+      min: 1
+  fail_fast:
+    - SOT_EMPTY_AFTER_EXECUTE
+
+report_profile:
+  profile_version: "1.0.0"
+  protocol: ssh_failure
+  highlight_metrics:
+    - ssh_auth_attempt_count
+    - ssh_auth_failed_count
+  sample_events: 5
+  sample_filter:
+    event: ssh_auth_attempt
+
+defaults:
+  max_hosts: 2
+  max_per_host: 30
+  max_total: 60
+  port: 22
+  timeout: 10.0
+
+safety:
+  max_events: 500
+  max_duration_sec: 300
+  allowed_domains: []
+  allowed_ports: [22]
+  forbidden_actions: [privilege_escalation, valid_credential_use, brute_force]
+  target_net_enforced: true
+
+requirements:
+  dsp_min_version: "1.0.0"
+  python_min_version: "3.11"
+
+executor:
+  module: executor
+  entrypoint: run
+  remote_capable: false
+  dry_run_supported: true

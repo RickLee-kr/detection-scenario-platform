@@ -1,0 +1,87 @@
+manifest_schema_version: "1.0.0"
+id: port_sweep
+name: Port Sweep — Horizontal Port Sweep Reconnaissance
+version: "1.0.0"
+description: >
+  Generates detectable horizontal port sweep activity across up to 5 hosts.
+  Default 13 common ports. Safe mode enabled — controlled TCP connection attempts only.
+  No exploitation, vulnerability scanning, or service fingerprinting.
+
+category: network
+tags: [phase_14, port_sweep, reconnaissance, ndr, xdr, ids, siem]
+enabled: true
+
+supported_targets:
+  requires: [alive_host]
+  optional: []
+  max_hosts: 5
+
+supported_protocols: [tcp]
+
+validation_profile:
+  profile_version: "1.0.0"
+  metrics:
+    - name: port_probe_count
+      event_filter:
+        event: port_probe_sent
+        status: sent
+      aggregate: count
+    - name: port_connection_attempt_count
+      event_filter:
+        event:
+          - port_connection_opened
+          - port_connection_failed
+      aggregate: count
+    - name: port_connection_success_count
+      event_filter:
+        event: port_connection_opened
+        status: sent
+      aggregate: count
+    - name: port_connection_failure_count
+      event_filter:
+        event: port_connection_failed
+      aggregate: count
+  success:
+    port_probe_count:
+      min: 1
+    port_connection_attempt_count:
+      min: 1
+  fail_fast:
+    - SOT_EMPTY_AFTER_EXECUTE
+
+report_profile:
+  profile_version: "1.0.0"
+  protocol: port_sweep
+  highlight_metrics:
+    - port_probe_count
+    - port_connection_attempt_count
+    - port_connection_success_count
+    - port_connection_failure_count
+  sample_events: 5
+  sample_filter:
+    event: port_probe_sent
+
+defaults:
+  max_hosts: 5
+  max_ports: 13
+  ports: [22, 23, 25, 53, 80, 110, 135, 139, 143, 389, 443, 445, 3389]
+  timeout: 3.0
+  safe_mode: true
+
+safety:
+  max_events: 1000
+  max_duration_sec: 300
+  allowed_domains: []
+  allowed_ports: [22, 23, 25, 53, 80, 110, 135, 139, 143, 389, 443, 445, 3389]
+  forbidden_actions: [exploitation, vulnerability_scanning, service_fingerprinting, payload_delivery]
+  target_net_enforced: true
+
+requirements:
+  dsp_min_version: "1.0.0"
+  python_min_version: "3.11"
+
+executor:
+  module: executor
+  entrypoint: run
+  remote_capable: false
+  dry_run_supported: true

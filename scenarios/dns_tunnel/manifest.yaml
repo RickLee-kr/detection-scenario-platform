@@ -1,0 +1,75 @@
+manifest_schema_version: "1.0.0"
+id: dns_tunnel
+name: DNS Tunnel — idx-pattern UDP/53
+version: "1.0.0"
+description: >
+  Generates idx-{seq:06d}-{base32} DNS tunnel FQDNs from a 2MB dummy payload,
+  transmits UDP/53 queries, and records tunnel events in Event Store.
+  Response not required for validation.
+
+category: dns
+tags: [phase_2b, dns, tunnel, udp53, ndr]
+enabled: true
+
+supported_targets:
+  requires: [alive_host]
+  optional: [dns_resolver]
+  max_hosts: 2
+
+supported_protocols: [dns_udp]
+
+validation_profile:
+  profile_version: "1.0.0"
+  metrics:
+    - name: dns_tunnel_chunk_created_count
+      event_filter:
+        event: dns_tunnel_chunk_created
+        status: info
+      aggregate: count
+    - name: dns_tunnel_query_sent_count
+      event_filter:
+        event: dns_tunnel_query_sent
+        status: sent
+      aggregate: count
+  success:
+    dns_tunnel_query_sent_count:
+      min: 1
+    dns_tunnel_chunk_created_count:
+      min: 1
+  fail_fast:
+    - SOT_EMPTY_AFTER_EXECUTE
+
+report_profile:
+  profile_version: "1.0.0"
+  protocol: dns_tunnel
+  highlight_metrics:
+    - dns_tunnel_chunk_created_count
+    - dns_tunnel_query_sent_count
+  sample_events: 5
+  sample_filter:
+    event: dns_tunnel_query_sent
+
+defaults:
+  volume_profile: standard
+  payload_mb: 2.0
+  chunk_size: 30
+  domain: "dns-tunnel.com"
+  max_hosts: 2
+
+safety:
+  max_events: 500000
+  max_duration_sec: 600
+  allowed_domains: [dns-tunnel.com]
+  allowed_ports: [53]
+  forbidden_actions: []
+  target_net_enforced: true
+
+requirements:
+  dsp_min_version: "1.0.0"
+  python_min_version: "3.11"
+
+executor:
+  module: executor
+  entrypoint: run
+  remote_capable: false
+  dry_run_supported: true

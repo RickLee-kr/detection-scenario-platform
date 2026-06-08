@@ -1,0 +1,58 @@
+manifest_schema_version: "1.0.0"
+id: dummy
+name: Dummy Scenario — Architecture Verification
+version: "1.0.0"
+description: >
+  Synthetic dry-run scenario for Phase 1A architecture validation.
+  Generates local events only — no network I/O.
+
+category: endpoint
+tags: [phase_1a, dry_run, architecture]
+enabled: true
+
+supported_targets:
+  requires: [alive_host]
+  optional: []
+  max_hosts: 1
+
+supported_protocols: [http]
+
+validation_profile:
+  profile_version: "1.0.0"
+  metrics:
+    - name: synthetic_action_count
+      event_filter:
+        event: synthetic_action
+        status: sent
+      aggregate: count
+  success:
+    synthetic_action_count:
+      min: 3
+  fail_fast:
+    - SOT_EMPTY_AFTER_EXECUTE
+
+report_profile:
+  profile_version: "1.0.0"
+  highlight_metrics: [synthetic_action_count]
+  sample_events: 5
+  sample_filter:
+    event: synthetic_action
+
+defaults:
+  action_count: 5
+
+safety:
+  max_events: 100
+  max_duration_sec: 60
+  forbidden_actions: []
+  target_net_enforced: true
+
+requirements:
+  dsp_min_version: "1.0.0"
+  python_min_version: "3.11"
+
+executor:
+  module: scenario
+  entrypoint: execute
+  remote_capable: false
+  dry_run_supported: true

@@ -1,0 +1,82 @@
+manifest_schema_version: "1.0.0"
+id: dga
+name: DGA — Domain Generation Algorithm Simulation
+version: "1.0.0"
+description: >
+  Phase 1 generates NXDOMAIN traffic under *.xdr.ooo (500 queries).
+  Phase 2 generates resolvable traffic under *.live.xdr.ooo (30 queries).
+  Validation uses Event Store only — no resolver response dependency.
+
+category: dns
+tags: [phase_3, dga, dns, nxdomain, ndr]
+enabled: true
+
+supported_targets:
+  requires: [dns_resolver]
+  optional: [alive_host]
+  max_hosts: 1
+
+supported_protocols: [dns_udp]
+
+validation_profile:
+  profile_version: "1.0.0"
+  metrics:
+    - name: dga_domain_generated_count
+      event_filter:
+        event: dga_domain_generated
+        status: info
+      aggregate: count
+    - name: dga_nxdomain_observed_count
+      event_filter:
+        event: dga_nxdomain_observed
+        status: nxdomain
+      aggregate: count
+    - name: dga_resolved_observed_count
+      event_filter:
+        event: dga_resolved_observed
+        status: response
+      aggregate: count
+  success:
+    dga_domain_generated_count:
+      min: 1
+    dga_nxdomain_observed_count:
+      min: 1
+    dga_resolved_observed_count:
+      min: 1
+  fail_fast:
+    - SOT_EMPTY_AFTER_EXECUTE
+
+report_profile:
+  profile_version: "1.0.0"
+  protocol: dga
+  highlight_metrics:
+    - dga_domain_generated_count
+    - dga_nxdomain_observed_count
+    - dga_resolved_observed_count
+  sample_events: 5
+  sample_filter:
+    event: dga_domain_generated
+
+defaults:
+  effective_tld: "xdr.ooo"
+  phase1_count: 500
+  phase2_count: 30
+  resolver: "10.10.10.20"
+
+safety:
+  max_events: 20000
+  max_duration_sec: 600
+  allowed_domains: [xdr.ooo]
+  allowed_ports: [53]
+  forbidden_actions: []
+  target_net_enforced: true
+
+requirements:
+  dsp_min_version: "1.0.0"
+  python_min_version: "3.11"
+
+executor:
+  module: executor
+  entrypoint: run
+  remote_capable: false
+  dry_run_supported: true

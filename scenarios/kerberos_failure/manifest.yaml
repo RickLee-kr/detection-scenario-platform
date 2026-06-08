@@ -1,0 +1,83 @@
+manifest_schema_version: "1.0.0"
+id: kerberos_failure
+name: Kerberos Failure — Authentication Failure Activity
+version: "1.0.0"
+description: >
+  Generates safe Kerberos authentication failure traffic across up to 5 hosts.
+  Default 10 attempts per host. Safe mode enabled — no valid credentials, no brute-force,
+  no credential harvesting, no ticket abuse. Controlled failed authentication only.
+
+category: auth
+tags: [phase_16, kerberos, auth_failure, ndr, identity]
+enabled: true
+
+supported_targets:
+  requires: [alive_host]
+  optional: [domain_controller, windows_host]
+  max_hosts: 5
+
+supported_protocols: [kerberos]
+
+validation_profile:
+  profile_version: "1.0.0"
+  metrics:
+    - name: kerberos_auth_attempt_count
+      event_filter:
+        event: kerberos_auth_attempt
+        status: sent
+      aggregate: count
+    - name: kerberos_auth_failed_count
+      event_filter:
+        event: kerberos_auth_failed
+        status: auth_failed
+      aggregate: count
+  success:
+    kerberos_auth_attempt_count:
+      min: 1
+    kerberos_auth_failed_count:
+      min: 1
+  fail_fast:
+    - SOT_EMPTY_AFTER_EXECUTE
+
+report_profile:
+  profile_version: "1.0.0"
+  protocol: kerberos_failure
+  highlight_metrics:
+    - kerberos_auth_attempt_count
+    - kerberos_auth_failed_count
+  sample_events: 5
+  sample_filter:
+    event: kerberos_auth_attempt
+
+defaults:
+  max_hosts: 5
+  attempts_per_host: 10
+  port: 88
+  realm: LOCAL.REALM
+  timeout: 10.0
+  safe_mode: true
+
+safety:
+  max_events: 500
+  max_duration_sec: 300
+  allowed_domains: []
+  allowed_ports: [88]
+  forbidden_actions:
+    - privilege_escalation
+    - valid_credential_use
+    - brute_force
+    - credential_harvesting
+    - ticket_abuse
+    - kerberoasting
+    - as_rep_roasting
+  target_net_enforced: true
+
+requirements:
+  dsp_min_version: "1.0.0"
+  python_min_version: "3.11"
+
+executor:
+  module: executor
+  entrypoint: run
+  remote_capable: false
+  dry_run_supported: true

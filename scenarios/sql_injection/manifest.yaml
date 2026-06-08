@@ -1,0 +1,79 @@
+manifest_schema_version: "1.0.0"
+id: sql_injection
+name: SQL Injection — Safe HTTP Request Patterns
+version: "1.0.0"
+description: >
+  Generates detectable SQL injection request patterns via HTTP GET query strings.
+  Max 2 hosts, 10 requests per host, 20 requests total. Not a vulnerability scanner
+  or exploitation tool — safe payload strings only.
+
+category: web
+tags: [phase_6, sql_injection, http, waf, ndr]
+enabled: true
+
+supported_targets:
+  requires: [alive_host]
+  optional: [http_host, https_host, web_app]
+  max_hosts: 2
+
+supported_protocols: [http, https]
+
+validation_profile:
+  profile_version: "1.0.0"
+  metrics:
+    - name: sql_payload_generated_count
+      event_filter:
+        event: sql_payload_generated
+        status: info
+      aggregate: count
+    - name: sql_request_sent_count
+      event_filter:
+        event: sql_request_sent
+        status: sent
+      aggregate: count
+  success:
+    sql_payload_generated_count:
+      min: 1
+    sql_request_sent_count:
+      min: 1
+  fail_fast:
+    - SOT_EMPTY_AFTER_EXECUTE
+
+report_profile:
+  profile_version: "1.0.0"
+  protocol: sql_injection
+  highlight_metrics:
+    - sql_payload_generated_count
+    - sql_request_sent_count
+  sample_events: 5
+  sample_filter:
+    event: sql_request_sent
+
+defaults:
+  max_hosts: 2
+  max_per_host: 10
+  max_total: 20
+  timeout: 10.0
+
+safety:
+  max_events: 500
+  max_duration_sec: 300
+  allowed_domains: []
+  allowed_ports: [443, 8443, 80, 8080, 8000]
+  forbidden_actions:
+    - data_exfiltration
+    - destructive_sql
+    - credential_extraction
+    - blind_sqli_engine
+    - vulnerability_scanning
+  target_net_enforced: true
+
+requirements:
+  dsp_min_version: "1.0.0"
+  python_min_version: "3.11"
+
+executor:
+  module: executor
+  entrypoint: run
+  remote_capable: false
+  dry_run_supported: true
