@@ -1,6 +1,6 @@
 """Detection Scenario Platform (DSP) — Phase 1A Core + Phase 1B DNS Foundation."""
 
-__version__ = "1.0.0"
+__version__ = "1.0.2"
 EVENT_SCHEMA_VERSION = "1.0.0"
 VALIDATION_RESULT_SCHEMA = "1.0.0"
 REPORT_FORMAT_VERSION = "1.0.0"

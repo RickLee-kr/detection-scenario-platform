@@ -74,20 +74,19 @@ export DSP_RUNS_DIR=/path/to/lab-evidence/runs
 
 .venv/bin/dsp run \
   --scenarios <scenario_id> \
-  --target-net 10.10.10.0/24 \
-  --dry-run false \
-  --scenario-params '<json_params>'
+  --target-net 10.10.10.0/24
 ```
 
-**Recommended params for S3 (not E2E-minimal):**
+For evidence export and manual verification templates, use the lab runner or Python API:
 
-| scenario_id | scenario_params (example) |
-|-------------|---------------------------|
-| `dns_tunnel` | `{"dns_tunnel": {"hosts": ["10.10.10.20"], "max_chunks": 100}}` |
-| `dga` | `{"dga": {"resolver": "10.10.10.20", "phase1_count": 500, "phase2_count": 30}}` |
-| `http_followup` | `{"http_followup": {"hosts": ["10.10.10.20"], "max_total": 20}}` |
-| `ssh_failure` | `{"ssh_failure": {"hosts": ["10.10.10.21"], "max_total": 30}}` |
-| `sql_injection` | `{"sql_injection": {"hosts": ["10.10.10.20"], "max_total": 20}}` |
+```bash
+python scripts/run_dsp_release_1_0_lab_test.py \
+  --mode local \
+  --scenario <scenario_id> \
+  --output-dir /path/to/lab-evidence/runs
+```
+
+**Do NOT use `--dry-run` for live Stellar S3 validation.**
 
 ### 3.3 Full MVP Battery (Sequential)
 

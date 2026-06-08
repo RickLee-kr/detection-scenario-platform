@@ -234,13 +234,16 @@ Scenario.execute(ctx, targets)   [same scenario code]
 ## 9. CLI / Configuration (Conceptual)
 
 ```bash
-# Mode A — default
+# Mode A — default (local execution provider)
 dsp run --scenarios dns_tunnel,dga
 
-# Mode B — explicit provider
-dsp run --scenarios dns_tunnel --execution-provider webshell --remote-target 10.10.10.50
-dsp run --scenarios dns_tunnel --execution-provider agent --agent-profile lab-victim-01
-dsp run --scenarios dns_tunnel --execution-provider ssh --ssh-host 10.10.10.50
+# Mode B — webshell provider (Python API / lab runner; not a dsp run CLI flag in v1.0.2)
+python scripts/run_dsp_release_1_0_lab_test.py \
+  --mode webshell \
+  --webshell-type jsp \
+  --webshell-url https://lab-victim.example/shell.jsp \
+  --remote-bundle-path /tmp/dsp/<run_id>/events.jsonl \
+  --output-dir /path/to/lab-evidence
 ```
 
 Run metadata에 `execution_mode`, `execution_provider_id`, `traffic_origin_host` 기록 (reporting only, validation 무관).

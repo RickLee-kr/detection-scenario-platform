@@ -112,7 +112,7 @@ Webshell execution is composed via Python API in Release 1.0. Use a lab script o
 
 | Setting | Example |
 |---------|---------|
-| `provider_type` | `jsp`, `php`, or `aspx` |
+| `webshell_family` | `jsp`, `php`, or `aspx` |
 | `webshell_url` | `https://lab-victim.example/shell.jsp` |
 | `run_id` | Stable ID shared with local Event Store and remote bundle |
 | `remote_bundle_path` | `/tmp/dsp/<run_id>/events.jsonl` (lab convention) |
@@ -151,7 +151,7 @@ assert record is not None
 
 provider = create_execution_provider(
     "webshell",
-    provider_type="jsp",
+    webshell_family="jsp",
     webshell_url=WEBSHELL_URL,
     verify_tls=False,  # lab only — use True in production
     enable_healthcheck_on_connect=True,

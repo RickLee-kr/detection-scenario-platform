@@ -501,8 +501,8 @@ Phase 1–5 구현·운영 모델. Default provider = `local`.
 
 ```
 [DSP Host — Orchestrator]
-  dsp run --execution-provider webshell --remote-target 10.10.10.50
-    → WebshellExecutionProvider
+  python scripts/run_dsp_release_1_0_lab_test.py --mode webshell ...
+    → WebshellExecutionProvider (Python API)
     → remote traffic on victim host
     → events sync → local Event Store
     → Validation / Report unchanged
