@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from tests.e2e.fixtures.bundle_helpers import event_record, write_bundle
+from tests.e2e.fixtures.bundle_helpers import remote_bundle_path_for_run
 from tests.e2e.fixtures.webshell_test_server import WebshellTestServer
 
 DSP_ROOT = Path(__file__).resolve().parents[2]
@@ -30,6 +30,7 @@ def test_help_works() -> None:
     result = _run_script("--help")
     assert result.returncode == 0
     assert "--mode" in result.stdout
+    assert "--traffic-profile" in result.stdout
     assert "local" in result.stdout
     assert "webshell" in result.stdout
 
@@ -46,6 +47,22 @@ def test_invalid_mode_fails_clearly() -> None:
     assert "invalid choice" in combined.lower() or "error" in combined.lower()
 
 
+def test_invalid_traffic_profile_rejected(tmp_path: Path) -> None:
+    result = _run_script(
+        "--mode",
+        "local",
+        "--scenario",
+        "dummy",
+        "--traffic-profile",
+        "turbo",
+        "--dry-run",
+        "--output-dir",
+        str(tmp_path / "out"),
+    )
+    assert result.returncode == 2
+    assert "unknown traffic profile" in result.stderr
+
+
 def test_local_mode_creates_expected_files(tmp_path: Path) -> None:
     output_dir = tmp_path / "dsp-local-test"
     result = _run_script(
@@ -53,12 +70,18 @@ def test_local_mode_creates_expected_files(tmp_path: Path) -> None:
         "local",
         "--scenario",
         "dummy",
+        "--traffic-profile",
+        "low",
+        "--dry-run",
         "--output-dir",
         str(output_dir),
         check=True,
     )
 
     assert result.returncode == 0
+    assert "traffic_profile=low" in result.stdout
+    assert "event_count=" in result.stdout
+    assert "manual_next_steps:" in result.stdout
     assert "generated_files:" in result.stdout
 
     run_id = _parse_run_id(result.stdout)
@@ -78,41 +101,45 @@ def test_local_mode_creates_expected_files(tmp_path: Path) -> None:
         assert path.stat().st_size > 0
 
 
+def test_local_mode_passes_traffic_profile(tmp_path: Path) -> None:
+    output_dir = tmp_path / "dsp-local-balanced"
+    result = _run_script(
+        "--mode",
+        "local",
+        "--scenario",
+        "dummy",
+        "--traffic-profile",
+        "balanced",
+        "--dry-run",
+        "--output-dir",
+        str(output_dir),
+        check=True,
+    )
+    assert "traffic_profile=balanced" in result.stdout
+    assert "scenario=dummy" in result.stdout
+
+
 def test_webshell_mode_creates_expected_files(tmp_path: Path) -> None:
     output_dir = tmp_path / "dsp-webshell-test"
     storage_dir = tmp_path / "remote-storage"
-    remote_bundle_path = f"/tmp/dsp/{RUN_ID}/events.jsonl"
+    remote_work_dir = "/tmp/dsp"
 
     server = WebshellTestServer(storage_dir=storage_dir)
     server.start()
     try:
-        bundle_path = storage_dir / "remote" / RUN_ID / "events.jsonl"
-        bundle_path.parent.mkdir(parents=True, exist_ok=True)
-        write_bundle(
-            bundle_path,
-            run_id=RUN_ID,
-            scenario_id="dummy",
-            events=[
-                event_record(
-                    run_id=RUN_ID,
-                    scenario_id="dummy",
-                    event="synthetic_action",
-                    status="sent",
-                    timestamp="2026-06-06T12:00:02Z",
-                ),
-            ],
-        )
-        server._files[remote_bundle_path] = bundle_path.read_bytes()
-
         result = _run_script(
             "--mode",
             "webshell",
-            "--webshell-type",
+            "--scenario",
+            "dummy",
+            "--traffic-profile",
+            "balanced",
+            "--webshell-family",
             "jsp",
             "--webshell-url",
             server.webshell_url,
-            "--remote-bundle-path",
-            remote_bundle_path,
+            "--remote-work-dir",
+            remote_work_dir,
             "--output-dir",
             str(output_dir),
             "--run-id",
@@ -123,7 +150,9 @@ def test_webshell_mode_creates_expected_files(tmp_path: Path) -> None:
         server.stop()
 
     assert result.returncode == 0
-    assert "events_imported=1" in result.stdout or "events_imported" in result.stdout
+    assert "traffic_profile=balanced" in result.stdout
+    assert "events_imported" in result.stdout or "event_count=" in result.stdout
+    assert "manual_next_steps:" in result.stdout
 
     expected = [
         output_dir / "events.db",
@@ -137,19 +166,23 @@ def test_webshell_mode_creates_expected_files(tmp_path: Path) -> None:
         assert path.is_file(), f"missing expected artifact: {path}"
         assert path.stat().st_size > 0
 
-    assert server.command_calls[:3] == ["whoami", "pwd", "hostname"]
+    assert server.command_calls[:3] == ["whoami", "hostname", "pwd"]
+    assert any(call.startswith("dsp-remote-scenario ") for call in server.command_calls)
+    assert remote_bundle_path_for_run(RUN_ID) in server.download_calls
 
 
 def test_webshell_mode_rejects_disallowed_command(tmp_path: Path) -> None:
     result = _run_script(
         "--mode",
         "webshell",
-        "--webshell-type",
+        "--scenario",
+        "dummy",
+        "--webshell-family",
         "jsp",
         "--webshell-url",
         "http://127.0.0.1/shell.jsp",
-        "--remote-bundle-path",
-        "/tmp/dsp/events.jsonl",
+        "--remote-work-dir",
+        "/tmp/dsp",
         "--output-dir",
         str(tmp_path / "out"),
         "--webshell-commands",

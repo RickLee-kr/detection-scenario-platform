@@ -77,16 +77,33 @@ export DSP_RUNS_DIR=/path/to/lab-evidence/runs
   --target-net 10.10.10.0/24
 ```
 
-For evidence export and manual verification templates, use the lab runner or Python API:
+For operational traffic execution with evidence export and manual verification templates, use the lab runner (DSP v1.1.0):
+
+**Host direct:**
 
 ```bash
 python scripts/run_dsp_release_1_0_lab_test.py \
   --mode local \
-  --scenario <scenario_id> \
-  --output-dir /path/to/lab-evidence/runs
+  --scenario dns_tunnel \
+  --traffic-profile balanced \
+  --target-net 10.10.10.0/24 \
+  --output-dir /tmp/dsp-host-test
 ```
 
-**Do NOT use `--dry-run` for live Stellar S3 validation.**
+**Webshell remote:**
+
+```bash
+python scripts/run_dsp_release_1_0_lab_test.py \
+  --mode webshell \
+  --scenario dns_tunnel \
+  --traffic-profile balanced \
+  --webshell-family jsp \
+  --webshell-url http://TARGET/shell.jsp \
+  --remote-work-dir /tmp/dsp \
+  --output-dir /tmp/dsp-webshell-test
+```
+
+**Do NOT use `--dry-run` for live Stellar validation.** DSP does not automatically confirm detection success — verify Stellar Sensor and UI manually using the generated evidence files.
 
 ### 3.3 Full MVP Battery (Sequential)
 
