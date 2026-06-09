@@ -1,3 +1,72 @@
+# DSP v1.3.0 Release Notes
+
+**Version:** 1.3.0  
+**Date:** 2026-06-09 (UTC)  
+**Package:** `detection-scenario-platform` (`dsp`)
+
+---
+
+## Summary
+
+DSP v1.3.0 simplifies the operator CLI around three decisions: **where** to run (`local` / `webshell`), **which network** (`--target-net`), and **how intensively** (`--profile low|normal|high`). Discovery, host selection, protocol coverage, follow-up, and scenario ordering are handled internally.
+
+### Operator CLI
+
+```bash
+# Default operational run (profile=normal)
+dsp run --target-net 221.139.249.0/24 --profile normal
+
+# Quick validation
+dsp run --target-net 221.139.249.0/24 --profile low
+
+# Maximum coverage
+dsp run --target-net 221.139.249.0/24 --profile high
+
+# Webshell — same UX
+dsp run --execution-provider webshell --webshell-family jsp \
+  --webshell-url http://server/shell.jsp \
+  --target-net 221.139.249.0/24 --profile normal
+```
+
+### Changed Components
+
+| Component | Change |
+|-----------|--------|
+| `dsp run` | `--profile` added; `--scenarios` now optional (advanced) |
+| `operational_profiles.py` | Profile → scenario coverage + host limits |
+| `traffic_profiles.py` | Renamed `balanced`→`normal`, `burst`→`high` (legacy aliases kept) |
+| `console_output.py` | Progress + evidence summary on stdout |
+| `RunManager` | Optional `on_progress` callback; `operational_profile` in run metadata |
+
+### Profiles
+
+| Profile | Scenarios | Host limit | Use case |
+|---------|-----------|------------|----------|
+| `low` | port_sweep, dns_tunnel, http_followup | 1 | Install / sensor check |
+| `normal` | + dga, sql_injection, ldap, smb, ssh, kerberos | 2 | Demo / validation |
+| `high` | same as normal | all discovered (capped) | Coverage / stress |
+
+### Pre-release hardening (v1.3.0)
+
+| Feature | Detail |
+|---------|--------|
+| Large CIDR guardrail | `--target-net` wider than `/24` blocked unless `--allow-large-target` **and** `--max-hosts` |
+| `--max-hosts` | Caps CIDR expansion and per-scenario host selection (including `high`) |
+| Progress counters | Per-scenario traffic metrics on completion (e.g. `queries_sent=100`) |
+| Traffic Summary | Aggregated scenario counters before Evidence Summary |
+
+```bash
+# Blocked:
+dsp run --target-net 10.0.0.0/16 --profile high
+
+# Allowed:
+dsp run --target-net 10.0.0.0/16 --profile high --allow-large-target --max-hosts 10
+```
+
+See [`docs/dsp-operational-cli-v1.3.0.md`](docs/dsp-operational-cli-v1.3.0.md).
+
+---
+
 # DSP v1.2.0 Release Notes
 
 **Version:** 1.2.0  

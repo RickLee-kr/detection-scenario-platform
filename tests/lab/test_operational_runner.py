@@ -22,7 +22,7 @@ def test_operational_runner_does_not_import_detection_modules() -> None:
 
 def test_local_mode_passes_profile_parameters(tmp_path: Path) -> None:
     output_dir = tmp_path / "local-profile"
-    scenario_params = build_scenario_params("dummy", "burst")
+    scenario_params = build_scenario_params("dummy", "high")
 
     with patch.object(operational_runner, "RunManager") as manager_cls:
         run_mock = MagicMock()
@@ -44,7 +44,7 @@ def test_local_mode_passes_profile_parameters(tmp_path: Path) -> None:
                     scenario_id="dummy",
                     output_dir=output_dir,
                     target_net="10.10.10.0/24",
-                    traffic_profile="burst",
+                    traffic_profile="high",
                     dry_run=False,
                 )
 
@@ -52,7 +52,7 @@ def test_local_mode_passes_profile_parameters(tmp_path: Path) -> None:
     call_kwargs = manager.run.call_args.kwargs
     assert call_kwargs["dry_run"] is False
     assert call_kwargs["scenario_params"] == scenario_params
-    assert result.traffic_profile == "burst"
+    assert result.traffic_profile == "high"
     assert result.event_count == 12
 
 
@@ -93,7 +93,7 @@ def test_webshell_command_includes_profile_parameters() -> None:
     from dsp.execution.remote.models import ScenarioExecutionRequest
     from dsp.runtime.traffic_profiles import scenario_params_for_profile
 
-    params = scenario_params_for_profile("dns_tunnel", "balanced")
+    params = scenario_params_for_profile("dns_tunnel", "normal")
     request = ScenarioExecutionRequest(
         scenario_id="dns_tunnel",
         scenario_params=params,
@@ -104,6 +104,6 @@ def test_webshell_command_includes_profile_parameters() -> None:
     command = build_scenario_command(request)
     assert command.command == REMOTE_SCENARIO_COMMAND
     payload = decode_scenario_payload(command.arguments[0])
-    assert payload["scenario_params"]["traffic_profile"] == "balanced"
+    assert payload["scenario_params"]["traffic_profile"] == "normal"
     assert payload["dry_run"] is False
     assert payload["scenario_id"] == "dns_tunnel"

@@ -5,15 +5,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-SUPPORTED_TRAFFIC_PROFILES = frozenset({"low", "balanced", "burst"})
+SUPPORTED_TRAFFIC_PROFILES = frozenset({"low", "normal", "high"})
+
+_PROFILE_ALIASES: dict[str, str] = {
+    "balanced": "normal",
+    "burst": "high",
+}
 
 # Per-scenario parameter templates keyed by operational profile name.
 # Explicit scenario_params passed at run time always override these values.
 _SCENARIO_PROFILE_PARAMS: dict[str, dict[str, dict[str, Any]]] = {
     "dummy": {
         "low": {"action_count": 3},
-        "balanced": {"action_count": 10},
-        "burst": {"action_count": 25},
+        "normal": {"action_count": 10},
+        "high": {"action_count": 25},
     },
     "dns_tunnel": {
         "low": {
@@ -23,14 +28,14 @@ _SCENARIO_PROFILE_PARAMS: dict[str, dict[str, dict[str, Any]]] = {
             "max_hosts": 1,
             "timeout": 0.1,
         },
-        "balanced": {
+        "normal": {
             "volume_profile": "standard",
             "payload_mb": 0.01,
             "max_chunks": 50,
             "max_hosts": 1,
             "timeout": 0.05,
         },
-        "burst": {
+        "high": {
             "volume_profile": "stress",
             "payload_mb": 0.5,
             "max_chunks": 150,
@@ -42,53 +47,53 @@ _SCENARIO_PROFILE_PARAMS: dict[str, dict[str, dict[str, Any]]] = {
     },
     "dga": {
         "low": {"phase1_count": 3, "phase2_count": 2, "timeout": 0.1},
-        "balanced": {"phase1_count": 10, "phase2_count": 5, "timeout": 0.05},
-        "burst": {"phase1_count": 30, "phase2_count": 15, "timeout": 0.05},
+        "normal": {"phase1_count": 10, "phase2_count": 5, "timeout": 0.05},
+        "high": {"phase1_count": 30, "phase2_count": 15, "timeout": 0.05},
     },
     "http_followup": {
         "low": {"max_hosts": 1, "max_per_host": 3, "max_total": 5, "timeout": 15.0},
-        "balanced": {"max_hosts": 2, "max_per_host": 10, "max_total": 20, "timeout": 10.0},
-        "burst": {"max_hosts": 3, "max_per_host": 30, "max_total": 60, "timeout": 5.0},
+        "normal": {"max_hosts": 2, "max_per_host": 10, "max_total": 20, "timeout": 10.0},
+        "high": {"max_hosts": 3, "max_per_host": 30, "max_total": 60, "timeout": 5.0},
     },
     "ssh_failure": {
         "low": {"max_hosts": 1, "max_per_host": 5, "max_total": 5, "timeout": 15.0},
-        "balanced": {"max_hosts": 2, "max_per_host": 15, "max_total": 25, "timeout": 10.0},
-        "burst": {"max_hosts": 2, "max_per_host": 30, "max_total": 50, "timeout": 5.0},
+        "normal": {"max_hosts": 2, "max_per_host": 15, "max_total": 25, "timeout": 10.0},
+        "high": {"max_hosts": 2, "max_per_host": 30, "max_total": 50, "timeout": 5.0},
     },
     "sql_injection": {
         "low": {"max_hosts": 1, "max_per_host": 3, "max_total": 5, "timeout": 15.0},
-        "balanced": {"max_hosts": 2, "max_per_host": 10, "max_total": 20, "timeout": 10.0},
-        "burst": {"max_hosts": 3, "max_per_host": 25, "max_total": 50, "timeout": 5.0},
+        "normal": {"max_hosts": 2, "max_per_host": 10, "max_total": 20, "timeout": 10.0},
+        "high": {"max_hosts": 3, "max_per_host": 25, "max_total": 50, "timeout": 5.0},
     },
     "port_sweep": {
         "low": {"max_hosts": 1, "max_ports": 5, "timeout": 5.0},
-        "balanced": {"max_hosts": 2, "max_ports": 15, "timeout": 3.0},
-        "burst": {"max_hosts": 3, "max_ports": 30, "timeout": 2.0},
+        "normal": {"max_hosts": 2, "max_ports": 15, "timeout": 3.0},
+        "high": {"max_hosts": 3, "max_ports": 30, "timeout": 2.0},
     },
     "kerberos_failure": {
         "low": {"max_hosts": 1, "attempts_per_host": 3, "timeout": 15.0},
-        "balanced": {"max_hosts": 2, "attempts_per_host": 10, "timeout": 10.0},
-        "burst": {"max_hosts": 2, "attempts_per_host": 25, "timeout": 5.0},
+        "normal": {"max_hosts": 2, "attempts_per_host": 10, "timeout": 10.0},
+        "high": {"max_hosts": 2, "attempts_per_host": 25, "timeout": 5.0},
     },
     "smb_login_failure": {
         "low": {"max_hosts": 1, "attempts_per_host": 3, "timeout": 15.0},
-        "balanced": {"max_hosts": 2, "attempts_per_host": 10, "timeout": 10.0},
-        "burst": {"max_hosts": 2, "attempts_per_host": 25, "timeout": 5.0},
+        "normal": {"max_hosts": 2, "attempts_per_host": 10, "timeout": 10.0},
+        "high": {"max_hosts": 2, "attempts_per_host": 25, "timeout": 5.0},
     },
     "ldap_enumeration": {
         "low": {"max_hosts": 1, "max_queries_per_host": 3, "timeout": 15.0},
-        "balanced": {"max_hosts": 2, "max_queries_per_host": 8, "timeout": 10.0},
-        "burst": {"max_hosts": 2, "max_queries_per_host": 20, "timeout": 5.0},
+        "normal": {"max_hosts": 2, "max_queries_per_host": 8, "timeout": 10.0},
+        "high": {"max_hosts": 2, "max_queries_per_host": 20, "timeout": 5.0},
     },
     "dns_dummy": {
         "low": {"query_count": 3},
-        "balanced": {"query_count": 8},
-        "burst": {"query_count": 20},
+        "normal": {"query_count": 8},
+        "high": {"query_count": 20},
     },
     "dns_transport_dummy": {
         "low": {"query_count": 3},
-        "balanced": {"query_count": 8},
-        "burst": {"query_count": 20},
+        "normal": {"query_count": 8},
+        "high": {"query_count": 20},
     },
 }
 
@@ -97,12 +102,12 @@ _PROFILE_META: dict[str, dict[str, Any]] = {
         "description": "Conservative traffic volume for first connectivity checks.",
         "intensity": 1,
     },
-    "balanced": {
+    "normal": {
         "description": "Moderate traffic volume — default operational test profile.",
         "intensity": 2,
     },
-    "burst": {
-        "description": "High traffic volume — short, aggressive generation with bounded duration.",
+    "high": {
+        "description": "High traffic volume — maximum coverage with bounded duration.",
         "intensity": 3,
     },
 }
@@ -121,6 +126,7 @@ class TrafficProfile:
 def parse_traffic_profile(name: str) -> str:
     """Normalize and validate a traffic profile name."""
     normalized = name.strip().lower()
+    normalized = _PROFILE_ALIASES.get(normalized, normalized)
     if normalized not in SUPPORTED_TRAFFIC_PROFILES:
         supported = ", ".join(sorted(SUPPORTED_TRAFFIC_PROFILES))
         raise ValueError(

@@ -27,7 +27,12 @@ def host_in_target_net(host: str, target_net: str) -> bool:
     return ipaddress.ip_address(host) in ipaddress.ip_network(target_net.strip(), strict=False)
 
 
-def resolve_targets(target_net: str, required_capabilities: list[str] | None = None) -> TargetSet:
+def resolve_targets(
+    target_net: str,
+    required_capabilities: list[str] | None = None,
+    *,
+    max_hosts: int | None = None,
+) -> TargetSet:
     """Build TargetSet from target_net; lab fallback only when target_net is absent."""
     caps = {cap: True for cap in (required_capabilities or [])}
     caps.setdefault("alive_host", True)
@@ -40,7 +45,8 @@ def resolve_targets(target_net: str, required_capabilities: list[str] | None = N
             capabilities=caps,
         )
 
-    hosts = expand_target_net_hosts(net)
+    host_cap = max_hosts if max_hosts is not None else MAX_EXPANDED_HOSTS
+    hosts = expand_target_net_hosts(net, max_hosts=host_cap)
     if not hosts:
         raise ValueError(f"target_net has no usable hosts: {net}")
 

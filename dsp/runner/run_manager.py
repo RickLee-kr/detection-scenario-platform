@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -23,7 +24,7 @@ from dsp.execution import ExecutionContext, create_execution_provider
 from dsp.execution.remote import RemoteEventCollectionRequest, RemoteEventCollector
 from dsp.execution.remote.paths import resolve_remote_bundle_path
 from dsp.execution.webshell_provider import WebshellExecutionProvider
-from dsp.event_store import EventStore, Run, RunStatus, ValidationDecision
+from dsp.event_store import EventQuery, EventStore, Run, RunStatus, ValidationDecision
 from dsp.manual_verification import (
     ManualVerificationPackageGenerator,
     ManualVerificationRequest,
@@ -93,6 +94,9 @@ class RunManager:
         remote_work_dir: str = DEFAULT_REMOTE_WORK_DIR,
         verify_tls: bool = False,
         export_evidence: bool = True,
+        operational_profile: str | None = None,
+        on_progress: Callable[[str, dict[str, Any]], None] | None = None,
+        max_hosts: int | None = None,
     ) -> tuple[Run, Path, int]:
         if execution_provider not in SUPPORTED_EXECUTION_PROVIDERS:
             run = Run(
@@ -183,6 +187,17 @@ class RunManager:
         run_id = generate_run_id()
         run_dir = self.runs_dir / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
+        run_started_at = datetime.now(timezone.utc)
+
+        if on_progress is not None:
+            on_progress(
+                "run_started",
+                {
+                    "provider": execution_provider,
+                    "target_net": target_net,
+                    "profile": operational_profile,
+                },
+            )
 
         config = RunConfig(
             target_net=target_net,
@@ -200,6 +215,7 @@ class RunManager:
                 "target_net": target_net,
                 "dry_run": dry_run,
                 "execution_provider": execution_provider,
+                "operational_profile": operational_profile,
             },
             dsp_version=DSP_VERSION,
         )
@@ -215,7 +231,14 @@ class RunManager:
             config=config,
             dry_run=dry_run,
         )
-        targets = resolve_targets(target_net)
+        targets = resolve_targets(target_net, max_hosts=max_hosts)
+
+        if on_progress is not None:
+            on_progress("discovery_started", {})
+            on_progress(
+                "discovery_completed",
+                {"hosts_found": len(targets.hosts)},
+            )
 
         provider = self._create_execution_provider(
             execution_provider,
@@ -245,6 +268,8 @@ class RunManager:
                 record = self.registry.get(sid)
                 assert record is not None
                 exec_ctx.scenario_id = sid
+                if on_progress is not None:
+                    on_progress("scenario_started", {"scenario_id": sid})
                 summary = provider.execute(
                     exec_ctx,
                     record,
@@ -259,6 +284,15 @@ class RunManager:
                         "event_count": summary.event_count,
                         "notes": summary.notes,
                     }
+                if on_progress is not None:
+                    completed_metrics = summaries.get(sid, {}).get("metrics", {})
+                    on_progress(
+                        "scenario_completed",
+                        {
+                            "scenario_id": sid,
+                            "metrics": completed_metrics,
+                        },
+                    )
 
                 if execution_provider == "webshell" and collector is not None:
                     assert isinstance(provider, WebshellExecutionProvider)
@@ -312,13 +346,26 @@ class RunManager:
         reporter.write_report_json(run_dir / "report.json", report)
 
         store.export_jsonl(run_dir / "events.jsonl")
+        event_count = store.count(EventQuery(run_id=run_id))
         store.close_run()
         self._write_run_json(run_dir / "run.json", run)
 
         if export_evidence:
             self._export_evidence(store, run_id=run_id, run_dir=run_dir)
+            if on_progress is not None:
+                on_progress("evidence_generated", {})
 
         exit_code = compute_exit_code(results)
+        duration_sec = (datetime.now(timezone.utc) - run_started_at).total_seconds()
+        if on_progress is not None:
+            on_progress(
+                "run_completed",
+                {
+                    "duration_sec": duration_sec,
+                    "event_count": event_count,
+                    "summaries": summaries,
+                },
+            )
         store.close()
         return run, run_dir, exit_code
 

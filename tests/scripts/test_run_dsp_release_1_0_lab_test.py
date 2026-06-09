@@ -109,13 +109,13 @@ def test_local_mode_passes_traffic_profile(tmp_path: Path) -> None:
         "--scenario",
         "dummy",
         "--traffic-profile",
-        "balanced",
+        "normal",
         "--dry-run",
         "--output-dir",
         str(output_dir),
         check=True,
     )
-    assert "traffic_profile=balanced" in result.stdout
+    assert "traffic_profile=normal" in result.stdout
     assert "scenario=dummy" in result.stdout
 
 
@@ -133,7 +133,7 @@ def test_webshell_mode_creates_expected_files(tmp_path: Path) -> None:
             "--scenario",
             "dummy",
             "--traffic-profile",
-            "balanced",
+            "normal",
             "--webshell-family",
             "jsp",
             "--webshell-url",
@@ -150,7 +150,7 @@ def test_webshell_mode_creates_expected_files(tmp_path: Path) -> None:
         server.stop()
 
     assert result.returncode == 0
-    assert "traffic_profile=balanced" in result.stdout
+    assert "traffic_profile=normal" in result.stdout
     assert "events_imported" in result.stdout or "event_count=" in result.stdout
     assert "manual_next_steps:" in result.stdout
 

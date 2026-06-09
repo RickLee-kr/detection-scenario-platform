@@ -40,7 +40,7 @@ DEFAULT_HARMLESS_COMMANDS = ("whoami", "hostname", "pwd")
 ALLOWED_HARMLESS_COMMANDS = frozenset(DEFAULT_HARMLESS_COMMANDS)
 DEFAULT_TARGET_NET = "10.10.10.0/24"
 DEFAULT_SCENARIO = "dummy"
-DEFAULT_TRAFFIC_PROFILE = "balanced"
+DEFAULT_TRAFFIC_PROFILE = "normal"
 DEFAULT_REMOTE_WORK_DIR = "/tmp/dsp"
 
 
@@ -364,7 +364,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--traffic-profile",
         default=DEFAULT_TRAFFIC_PROFILE,
         help=(
-            "Operational traffic profile: low, balanced, or burst "
+            "Operational traffic profile: low, normal, or high "
             f"(default: {DEFAULT_TRAFFIC_PROFILE})."
         ),
     )

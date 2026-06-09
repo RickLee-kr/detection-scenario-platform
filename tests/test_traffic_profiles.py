@@ -26,20 +26,25 @@ def test_parse_traffic_profile_rejects_invalid() -> None:
 
 
 def test_resolve_traffic_profile_metadata() -> None:
-    profile = resolve_traffic_profile("balanced")
-    assert profile.name == "balanced"
+    profile = resolve_traffic_profile("normal")
+    assert profile.name == "normal"
     assert profile.intensity == 2
     assert "moderate" in profile.description.lower()
 
 
+def test_parse_traffic_profile_accepts_legacy_aliases() -> None:
+    assert parse_traffic_profile("balanced") == "normal"
+    assert parse_traffic_profile("burst") == "high"
+
+
 def test_dns_tunnel_profile_mapping_increases_with_intensity() -> None:
     low = scenario_params_for_profile("dns_tunnel", "low")
-    balanced = scenario_params_for_profile("dns_tunnel", "balanced")
-    burst = scenario_params_for_profile("dns_tunnel", "burst")
+    normal = scenario_params_for_profile("dns_tunnel", "normal")
+    high = scenario_params_for_profile("dns_tunnel", "high")
 
-    assert low["max_chunks"] < balanced["max_chunks"] < burst["max_chunks"]
+    assert low["max_chunks"] < normal["max_chunks"] < high["max_chunks"]
     assert low["traffic_profile"] == "low"
-    assert burst["traffic_profile"] == "burst"
+    assert high["traffic_profile"] == "high"
 
 
 def test_build_scenario_params_wraps_scenario_id() -> None:
@@ -54,6 +59,6 @@ def test_build_scenario_params_applies_overrides() -> None:
 
 
 def test_profile_for_scenario_includes_scenario_params() -> None:
-    profile = profile_for_scenario("http_followup", "burst")
-    assert profile.name == "burst"
+    profile = profile_for_scenario("http_followup", "high")
+    assert profile.name == "high"
     assert profile.scenario_params["max_total"] == 60
