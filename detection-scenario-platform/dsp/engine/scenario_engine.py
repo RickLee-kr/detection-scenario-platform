@@ -71,8 +71,6 @@ class TargetSet:
 
     @classmethod
     def stub(cls, target_net: str = "10.10.10.0/24") -> TargetSet:
-        return cls(
-            target_net=target_net,
-            hosts=["10.10.10.20"],
-            capabilities={"alive_host": True},
-        )
+        from dsp.engine.target_engine import resolve_targets
+
+        return resolve_targets(target_net)

@@ -1,3 +1,33 @@
+# DSP v1.2.1 Release Notes
+
+**Version:** 1.2.1  
+**Date:** 2026-06-09 (UTC)  
+**Package:** `detection-scenario-platform` (`dsp`)
+
+---
+
+## Summary
+
+DSP v1.2.1 fixes `--target-net` propagation so live scenario traffic uses the operator-supplied CIDR instead of always falling back to the lab default host `10.10.10.20`. The `10.10.10.20` fallback is now applied only when `target_net` is absent or empty.
+
+### Changed Components
+
+| Component | Change |
+|-----------|--------|
+| `target_engine.py` | CIDR expansion via `expand_target_net_hosts()`; lab fallback only when `target_net` is empty |
+| `scenario_engine.py` | `TargetSet.stub()` delegates to `resolve_targets()` |
+| Tests | New `test_target_net_propagation.py` — **838 pytest tests passed** |
+
+### Upgrade
+
+```bash
+cd detection-scenario-platform
+pip install -e ".[dev]"
+dsp --version   # expect: dsp 1.2.1
+```
+
+---
+
 # DSP v1.2.0 Release Notes
 
 **Version:** 1.2.0  
