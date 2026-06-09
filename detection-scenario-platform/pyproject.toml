@@ -1,6 +1,6 @@
 [project]
 name = "dsp"
-version = "1.1.0"
+version = "1.2.0"
 description = "Detection Scenario Platform — Core Platform Skeleton (Phase 1A)"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -15,6 +15,7 @@ dev = [
 
 [project.scripts]
 dsp = "dsp.runner.cli:main"
+dsp-remote-scenario = "dsp.runner.remote_scenario_cli:main"
 
 [build-system]
 requires = ["hatchling"]

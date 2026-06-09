@@ -20,6 +20,8 @@ from dsp.execution import ExecutionContext, create_execution_provider
 from dsp.execution.providers.runtime.command.command_models import CommandRequest
 from dsp.execution.remote import RemoteEventCollectionRequest, RemoteEventCollector
 from dsp.execution.remote.models import ScenarioExecutionRequest
+from dsp.execution.remote.paths import resolve_remote_bundle_path
+from dsp.execution.remote.paths import resolve_remote_bundle_path
 from dsp.execution.remote.runner import RemoteScenarioRunner
 from dsp.manual_verification import (
     ManualVerificationPackageGenerator,
@@ -82,12 +84,6 @@ def _ensure_output_dir(path: Path) -> Path:
     resolved = path.expanduser().resolve()
     resolved.mkdir(parents=True, exist_ok=True)
     return resolved
-
-
-def resolve_remote_bundle_path(remote_work_dir: str, run_id: str) -> str:
-    """Derive the remote events.jsonl path from work directory and run ID."""
-    base = remote_work_dir.rstrip("/")
-    return f"{base}/{run_id}/events.jsonl"
 
 
 def _collect_run_artifacts(run_dir: Path) -> list[Path]:

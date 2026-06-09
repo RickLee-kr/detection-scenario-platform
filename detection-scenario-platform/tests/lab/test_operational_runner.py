@@ -85,7 +85,11 @@ def test_local_mode_dummy_safe_with_dry_run(tmp_path: Path) -> None:
 
 
 def test_webshell_command_includes_profile_parameters() -> None:
-    from dsp.execution.remote.payload import REMOTE_SCENARIO_COMMAND, build_scenario_command
+    from dsp.execution.remote.payload import (
+        REMOTE_SCENARIO_COMMAND,
+        build_scenario_command,
+        decode_scenario_payload,
+    )
     from dsp.execution.remote.models import ScenarioExecutionRequest
     from dsp.runtime.traffic_profiles import scenario_params_for_profile
 
@@ -99,7 +103,7 @@ def test_webshell_command_includes_profile_parameters() -> None:
     )
     command = build_scenario_command(request)
     assert command.command == REMOTE_SCENARIO_COMMAND
-    payload = json.loads(command.arguments[0])
+    payload = decode_scenario_payload(command.arguments[0])
     assert payload["scenario_params"]["traffic_profile"] == "balanced"
     assert payload["dry_run"] is False
     assert payload["scenario_id"] == "dns_tunnel"

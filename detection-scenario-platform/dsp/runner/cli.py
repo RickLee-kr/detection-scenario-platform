@@ -64,6 +64,31 @@ def main(argv: list[str] | None = None) -> int:
             "'http' queries a live Stellar API (experimental — see docs/experimental/)."
         ),
     )
+    run_parser.add_argument(
+        "--execution-provider",
+        default="local",
+        choices=["local", "webshell"],
+        help="Execution provider: local (in-process) or webshell (remote host).",
+    )
+    run_parser.add_argument(
+        "--webshell-family",
+        choices=["jsp", "php", "aspx"],
+        help="Webshell family (required when --execution-provider=webshell).",
+    )
+    run_parser.add_argument(
+        "--webshell-url",
+        help="Webshell endpoint URL (required when --execution-provider=webshell).",
+    )
+    run_parser.add_argument(
+        "--remote-work-dir",
+        default="/tmp/dsp",
+        help="Remote working directory for webshell bundle output (default: /tmp/dsp).",
+    )
+    run_parser.add_argument(
+        "--verify-tls",
+        action="store_true",
+        help="Verify TLS certificates for webshell HTTP transport.",
+    )
     run_parser.epilog = _DETECTION_EPILOG
     run_parser.formatter_class = argparse.RawDescriptionHelpFormatter
 
@@ -86,6 +111,11 @@ def main(argv: list[str] | None = None) -> int:
             confirm_detection=args.confirm_detection,
             detection_provider=args.detection_provider,
             stellar_client=args.stellar_client,
+            execution_provider=args.execution_provider,
+            webshell_family=args.webshell_family,
+            webshell_url=args.webshell_url,
+            remote_work_dir=args.remote_work_dir,
+            verify_tls=args.verify_tls,
         )
         print(f"Run {run.run_id} status={run.status.value} dir={run_dir}")
         return exit_code

@@ -10,13 +10,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from dsp.execution.remote.payload import REMOTE_SCENARIO_COMMAND
+from dsp.execution.remote.payload import REMOTE_SCENARIO_COMMAND, decode_scenario_payload
+from dsp.runner.remote_scenario_cli import main as remote_scenario_main
 
-from tests.e2e.fixtures.bundle_helpers import (
-    event_record,
-    remote_bundle_path_for_run,
-    write_bundle,
-)
+from tests.e2e.fixtures.bundle_helpers import remote_bundle_path_for_run
 
 
 @dataclass
@@ -116,51 +113,28 @@ class WebshellTestServer:
         if not command_line.startswith(f"{REMOTE_SCENARIO_COMMAND} "):
             return
         payload_raw = command_line[len(REMOTE_SCENARIO_COMMAND) + 1 :]
-        payload = json.loads(payload_raw)
-        self._create_remote_bundle(payload)
+        payload = decode_scenario_payload(payload_raw)
+        self._execute_remote_scenario(payload)
 
-    def _create_remote_bundle(self, payload: dict[str, Any]) -> None:
+    def _execute_remote_scenario(self, payload: dict[str, Any]) -> None:
         run_id = str(payload["run_id"])
-        scenario_id = str(payload["scenario_id"])
-        events = [
-            event_record(
-                run_id=run_id,
-                scenario_id=scenario_id,
-                event="scenario_started",
-                status="info",
-                stage="executor",
-                timestamp="2026-06-06T12:00:01Z",
-                source="remote",
-            ),
-            event_record(
-                run_id=run_id,
-                scenario_id=scenario_id,
-                event="synthetic_action",
-                status="sent",
-                timestamp="2026-06-06T12:00:02Z",
-                source="remote",
-            ),
-            event_record(
-                run_id=run_id,
-                scenario_id=scenario_id,
-                event="scenario_completed",
-                status="info",
-                stage="executor",
-                timestamp="2026-06-06T12:00:03Z",
-                source="remote",
-            ),
-        ]
-        bundle_path = remote_bundle_path_for_run(run_id)
         storage_root = self.storage_dir or Path("/tmp/dsp-test-server")
-        temp_path = storage_root / run_id / "events.jsonl"
-        temp_path.parent.mkdir(parents=True, exist_ok=True)
-        write_bundle(
-            temp_path,
-            run_id=run_id,
-            scenario_id=scenario_id,
-            events=events,
-        )
-        self._files[bundle_path] = temp_path.read_bytes()
+        local_dir = storage_root / run_id
+        local_dir.mkdir(parents=True, exist_ok=True)
+        local_bundle = local_dir / "events.jsonl"
+        virtual_path = remote_bundle_path_for_run(run_id)
+
+        metadata = dict(payload.get("execution_metadata") or {})
+        metadata["remote_bundle_path"] = str(local_bundle)
+        payload["execution_metadata"] = metadata
+
+        encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+        exit_code = remote_scenario_main([encoded])
+        if exit_code != 0:
+            raise RuntimeError(f"dsp-remote-scenario failed with exit code {exit_code}")
+
+        if local_bundle.is_file():
+            self._files[virtual_path] = local_bundle.read_bytes()
 
     def _handle_upload(self, body: bytes, content_type: str) -> None:
         boundary = _extract_boundary(content_type)

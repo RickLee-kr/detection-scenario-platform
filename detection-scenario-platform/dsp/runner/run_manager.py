@@ -7,6 +7,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from dsp import __version__ as DSP_VERSION
 from dsp.detection.factory import (
@@ -17,11 +18,23 @@ from dsp.detection.factory import (
 from dsp.detection.manager import DetectionManager
 from dsp.detection.reporting import build_detection_confirmation_entries
 from dsp.engine import RunConfig, RunContext, resolve_targets
+from dsp.evidence import EvidenceExportRequest, EvidenceExporter
 from dsp.execution import ExecutionContext, create_execution_provider
+from dsp.execution.remote import RemoteEventCollectionRequest, RemoteEventCollector
+from dsp.execution.remote.paths import resolve_remote_bundle_path
+from dsp.execution.webshell_provider import WebshellExecutionProvider
 from dsp.event_store import EventStore, Run, RunStatus, ValidationDecision
+from dsp.manual_verification import (
+    ManualVerificationPackageGenerator,
+    ManualVerificationRequest,
+)
 from dsp.plugins import PluginLoader, PluginStatus
 from dsp.reporting import ReportingEngine
 from dsp.validation import ValidationEngine
+
+SUPPORTED_EXECUTION_PROVIDERS = frozenset({"local", "webshell"})
+SUPPORTED_WEBSHELL_FAMILIES = frozenset({"jsp", "php", "aspx"})
+DEFAULT_REMOTE_WORK_DIR = "/tmp/dsp"
 
 
 def default_runs_dir() -> Path:
@@ -74,7 +87,41 @@ class RunManager:
         confirm_detection: bool = False,
         detection_provider: str = "stellar",
         stellar_client: str = "manual",
+        execution_provider: str = "local",
+        webshell_family: str | None = None,
+        webshell_url: str | None = None,
+        remote_work_dir: str = DEFAULT_REMOTE_WORK_DIR,
+        verify_tls: bool = False,
+        export_evidence: bool = True,
     ) -> tuple[Run, Path, int]:
+        if execution_provider not in SUPPORTED_EXECUTION_PROVIDERS:
+            run = Run(
+                run_id=generate_run_id(),
+                status=RunStatus.CONFIG_ERROR,
+                target_net=target_net,
+                dry_run=dry_run,
+                requested_scenarios=scenario_ids,
+            )
+            return run, self.runs_dir, 3
+
+        if execution_provider == "webshell":
+            missing = []
+            if not webshell_family:
+                missing.append("webshell_family")
+            if not webshell_url:
+                missing.append("webshell_url")
+            if webshell_family and webshell_family not in SUPPORTED_WEBSHELL_FAMILIES:
+                missing.append(f"unsupported webshell_family={webshell_family!r}")
+            if missing:
+                run = Run(
+                    run_id=generate_run_id(),
+                    status=RunStatus.CONFIG_ERROR,
+                    target_net=target_net,
+                    dry_run=dry_run,
+                    requested_scenarios=scenario_ids,
+                )
+                return run, self.runs_dir, 3
+
         active = set(self.registry.active_ids())
         if not scenario_ids:
             scenario_ids = sorted(active)
@@ -149,7 +196,11 @@ class RunManager:
             status=RunStatus.RUNNING,
             dry_run=dry_run,
             requested_scenarios=scenario_ids,
-            config_snapshot={"target_net": target_net, "dry_run": dry_run},
+            config_snapshot={
+                "target_net": target_net,
+                "dry_run": dry_run,
+                "execution_provider": execution_provider,
+            },
             dsp_version=DSP_VERSION,
         )
 
@@ -166,14 +217,27 @@ class RunManager:
         )
         targets = resolve_targets(target_net)
 
-        provider = create_execution_provider("local")
+        provider = self._create_execution_provider(
+            execution_provider,
+            webshell_family=webshell_family,
+            webshell_url=webshell_url,
+            verify_tls=verify_tls,
+        )
         exec_ctx = ExecutionContext(
             run_id=run_id,
             target_net=target_net,
             dry_run=dry_run,
             provider_type=provider.provider_type,
         )
+        if execution_provider == "webshell":
+            exec_ctx.execution_metadata["remote_work_dir"] = remote_work_dir
+            exec_ctx.execution_metadata["remote_bundle_path"] = resolve_remote_bundle_path(
+                remote_work_dir,
+                run_id,
+            )
+
         provider.prepare(exec_ctx)
+        collector = RemoteEventCollector() if execution_provider == "webshell" else None
 
         summaries: dict[str, dict] = {}
         try:
@@ -195,6 +259,25 @@ class RunManager:
                         "event_count": summary.event_count,
                         "notes": summary.notes,
                     }
+
+                if execution_provider == "webshell" and collector is not None:
+                    assert isinstance(provider, WebshellExecutionProvider)
+                    remote_execution_id = exec_ctx.execution_metadata.get(
+                        "remote_execution_id",
+                        run_id,
+                    )
+                    remote_bundle_path = exec_ctx.execution_metadata["remote_bundle_path"]
+                    collection_result = collector.collect(
+                        RemoteEventCollectionRequest(
+                            remote_execution_id=str(remote_execution_id),
+                            remote_bundle_path=str(remote_bundle_path),
+                        ),
+                        provider,
+                        store,
+                    )
+                    exec_ctx.execution_metadata["events_imported"] = (
+                        collection_result.events_imported
+                    )
         finally:
             provider.cleanup(exec_ctx)
 
@@ -232,9 +315,48 @@ class RunManager:
         store.close_run()
         self._write_run_json(run_dir / "run.json", run)
 
+        if export_evidence:
+            self._export_evidence(store, run_id=run_id, run_dir=run_dir)
+
         exit_code = compute_exit_code(results)
         store.close()
         return run, run_dir, exit_code
+
+    @staticmethod
+    def _create_execution_provider(
+        execution_provider: str,
+        *,
+        webshell_family: str | None = None,
+        webshell_url: str | None = None,
+        verify_tls: bool = False,
+    ):
+        if execution_provider == "local":
+            return create_execution_provider("local")
+        return create_execution_provider(
+            "webshell",
+            webshell_family=webshell_family,
+            webshell_url=webshell_url,
+            verify_tls=verify_tls,
+            enable_healthcheck_on_connect=True,
+        )
+
+    @staticmethod
+    def _export_evidence(
+        store: EventStore,
+        *,
+        run_id: str,
+        run_dir: Path,
+    ) -> dict[str, Any]:
+        evidence_result = EvidenceExporter(store).export(
+            EvidenceExportRequest(run_id=run_id, output_directory=run_dir)
+        )
+        manual_result = ManualVerificationPackageGenerator(store).generate(
+            ManualVerificationRequest(run_id=run_id, output_directory=run_dir)
+        )
+        return {
+            "evidence_export_metadata": dict(evidence_result.export_metadata),
+            "manual_verification_metadata": dict(manual_result.package_metadata),
+        }
 
     def _run_detection_confirmation(
         self,
