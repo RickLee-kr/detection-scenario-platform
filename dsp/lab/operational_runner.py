@@ -7,13 +7,12 @@ verification templates. Does not validate detections, alerts, or attack success.
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Sequence
 
 from dsp.event_store import EventQuery, EventStore
 from dsp.evidence import EvidenceExportRequest, EvidenceExporter
@@ -21,13 +20,13 @@ from dsp.execution import ExecutionContext, create_execution_provider
 from dsp.execution.providers.runtime.command.command_models import CommandRequest
 from dsp.execution.remote import RemoteEventCollectionRequest, RemoteEventCollector
 from dsp.execution.remote.models import ScenarioExecutionRequest
+from dsp.execution.remote.paths import resolve_remote_bundle_path
+from dsp.execution.remote.paths import resolve_remote_bundle_path
 from dsp.execution.remote.runner import RemoteScenarioRunner
-from dsp.execution.webshell_provider import WebshellExecutionProvider
 from dsp.manual_verification import (
     ManualVerificationPackageGenerator,
     ManualVerificationRequest,
 )
-from dsp.plugins import PluginLoader
 from dsp.runner.run_manager import RunManager
 from dsp.runtime.traffic_profiles import (
     build_scenario_params,
@@ -43,19 +42,11 @@ DEFAULT_TARGET_NET = "10.10.10.0/24"
 DEFAULT_SCENARIO = "dummy"
 DEFAULT_TRAFFIC_PROFILE = "balanced"
 DEFAULT_REMOTE_WORK_DIR = "/tmp/dsp"
-SUMMARY_FILENAME = "summary.json"
-
-MANUAL_NEXT_STEPS = (
-    "1. Check Stellar Sensor traffic visibility.",
-    "2. Check Stellar UI manually.",
-    "3. Review generated evidence files.",
-    "4. Fill in manual verification notes.",
-)
 
 
 @dataclass
 class LabRunResult:
-    """Paths and metadata produced by a single operational lab run."""
+    """Paths and metadata produced by an operational lab run."""
 
     mode: str
     scenario: str
@@ -68,77 +59,9 @@ class LabRunResult:
     metadata: dict[str, object] = field(default_factory=dict)
 
 
-@dataclass
-class ScenarioRunOutcome:
-    """Per-scenario result within a batch lab run."""
-
-    scenario_id: str
-    status: str
-    run_id: str | None = None
-    run_dir: str | None = None
-    event_count: int = 0
-    error: str | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class BatchLabRunResult:
-    """Aggregate result for multi-scenario operational lab runs."""
-
-    mode: str
-    traffic_profile: str
-    output_dir: Path
-    scenario_ids: list[str]
-    started_at: str
-    ended_at: str
-    summary_path: Path
-    outcomes: list[ScenarioRunOutcome] = field(default_factory=list)
-
-    @property
-    def succeeded(self) -> int:
-        return sum(1 for outcome in self.outcomes if outcome.status == "success")
-
-    @property
-    def failed(self) -> int:
-        return sum(1 for outcome in self.outcomes if outcome.status == "failed")
-
-
-def _generate_run_id(*, suffix: str | None = None) -> str:
+def _generate_run_id() -> str:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    base = f"dsp_lab_{stamp}"
-    return f"{base}_{suffix}" if suffix else base
-
-
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def resolve_active_scenario_ids() -> list[str]:
-    """Return sorted ACTIVE plugin IDs."""
-    registry = PluginLoader().discover_and_load()
-    return sorted(registry.active_ids())
-
-
-def parse_scenario_list(raw: str) -> list[str]:
-    """Parse a comma-separated scenario ID list."""
-    scenario_ids = [part.strip() for part in raw.split(",") if part.strip()]
-    if not scenario_ids:
-        raise ValueError("at least one scenario ID is required in --scenarios")
-    return scenario_ids
-
-
-def resolve_requested_scenarios(args: argparse.Namespace) -> tuple[list[str], bool]:
-    """Resolve scenario IDs and whether batch layout should be used."""
-    if args.all_scenarios and args.scenarios:
-        raise ValueError("use either --all-scenarios or --scenarios, not both")
-    if args.all_scenarios:
-        scenario_ids = resolve_active_scenario_ids()
-        if not scenario_ids:
-            raise ValueError("no ACTIVE scenario plugins discovered")
-        return scenario_ids, True
-    if args.scenarios:
-        return parse_scenario_list(args.scenarios), True
-    return [args.scenario], False
+    return f"dsp_lab_{stamp}"
 
 
 def _parse_harmless_commands(raw: str | None) -> tuple[str, ...]:
@@ -161,12 +84,6 @@ def _ensure_output_dir(path: Path) -> Path:
     resolved = path.expanduser().resolve()
     resolved.mkdir(parents=True, exist_ok=True)
     return resolved
-
-
-def resolve_remote_bundle_path(remote_work_dir: str, run_id: str) -> str:
-    """Derive the remote events.jsonl path from work directory and run ID."""
-    base = remote_work_dir.rstrip("/")
-    return f"{base}/{run_id}/events.jsonl"
 
 
 def _collect_run_artifacts(run_dir: Path) -> list[Path]:
@@ -267,20 +184,21 @@ def run_local_lab(
         store.close()
 
 
-def _run_webshell_scenario(
-    provider: WebshellExecutionProvider,
+def run_webshell_lab(
     *,
     scenario_id: str,
     output_dir: Path,
     run_id: str,
     target_net: str,
     traffic_profile: str,
+    webshell_family: str,
+    webshell_url: str,
     remote_work_dir: str,
+    verify_tls: bool,
+    harmless_commands: Sequence[str],
     remote_bundle_path: str | None = None,
-    preflight_done: bool = False,
-    harmless_commands: Sequence[str] = DEFAULT_HARMLESS_COMMANDS,
 ) -> LabRunResult:
-    """Execute one webshell scenario using an initialized provider."""
+    """Execute a scenario remotely via webshell and collect remote events."""
     profile = profile_for_scenario(scenario_id, traffic_profile)
     scenario_params = profile.scenario_params
     bundle_path = remote_bundle_path or resolve_remote_bundle_path(
@@ -293,6 +211,13 @@ def _run_webshell_scenario(
     generated: list[Path] = [run_dir / "events.db"]
     command_results: list[dict[str, object]] = []
 
+    provider = create_execution_provider(
+        "webshell",
+        webshell_family=webshell_family,
+        webshell_url=webshell_url,
+        verify_tls=verify_tls,
+        enable_healthcheck_on_connect=True,
+    )
     exec_ctx = ExecutionContext(
         run_id=run_id,
         target_net=target_net,
@@ -302,17 +227,17 @@ def _run_webshell_scenario(
     )
 
     try:
-        if not preflight_done:
-            provider.prepare(exec_ctx)
-            for command in harmless_commands:
-                result = provider.execute_command(CommandRequest.new(command))
-                command_results.append(
-                    {
-                        "command": command,
-                        "status": str(result.status),
-                        "command_id": result.command_id,
-                    }
-                )
+        provider.prepare(exec_ctx)
+
+        for command in harmless_commands:
+            result = provider.execute_command(CommandRequest.new(command))
+            command_results.append(
+                {
+                    "command": command,
+                    "status": str(result.status),
+                    "command_id": result.command_id,
+                }
+            )
 
         scenario_request = ScenarioExecutionRequest(
             scenario_id=scenario_id,
@@ -364,6 +289,8 @@ def _run_webshell_scenario(
             event_count=event_count,
             generated_files=generated,
             metadata={
+                "webshell_family": webshell_family,
+                "webshell_url": webshell_url,
                 "remote_work_dir": remote_work_dir,
                 "remote_bundle_path": bundle_path,
                 "harmless_commands": list(harmless_commands),
@@ -375,205 +302,16 @@ def _run_webshell_scenario(
             },
         )
     finally:
+        provider.cleanup(exec_ctx)
         store.close()
 
 
-def run_webshell_lab(
-    *,
-    scenario_id: str,
-    output_dir: Path,
-    run_id: str,
-    target_net: str,
-    traffic_profile: str,
-    webshell_family: str,
-    webshell_url: str,
-    remote_work_dir: str,
-    verify_tls: bool,
-    harmless_commands: Sequence[str],
-    remote_bundle_path: str | None = None,
-) -> LabRunResult:
-    """Execute a scenario remotely via webshell and collect remote events."""
-    provider = create_execution_provider(
-        "webshell",
-        webshell_family=webshell_family,
-        webshell_url=webshell_url,
-        verify_tls=verify_tls,
-        enable_healthcheck_on_connect=True,
-    )
-    exec_ctx = ExecutionContext(
-        run_id=run_id,
-        target_net=target_net,
-        dry_run=False,
-        provider_type="webshell",
-        scenario_id=scenario_id,
-    )
-    try:
-        return _run_webshell_scenario(
-            provider,
-            scenario_id=scenario_id,
-            output_dir=output_dir,
-            run_id=run_id,
-            target_net=target_net,
-            traffic_profile=traffic_profile,
-            remote_work_dir=remote_work_dir,
-            remote_bundle_path=remote_bundle_path,
-            preflight_done=False,
-            harmless_commands=harmless_commands,
-        )
-    finally:
-        provider.cleanup(exec_ctx)
-
-
-def _lab_result_to_outcome(result: LabRunResult) -> ScenarioRunOutcome:
-    return ScenarioRunOutcome(
-        scenario_id=result.scenario,
-        status="success",
-        run_id=result.run_id,
-        run_dir=str(result.run_dir),
-        event_count=result.event_count,
-        metadata=dict(result.metadata),
-    )
-
-
-def _failure_outcome(scenario_id: str, exc: Exception) -> ScenarioRunOutcome:
-    return ScenarioRunOutcome(
-        scenario_id=scenario_id,
-        status="failed",
-        error=str(exc),
-    )
-
-
-def write_summary_json(batch: BatchLabRunResult) -> Path:
-    """Write batch summary.json to the output directory."""
-    payload = {
-        "mode": batch.mode,
-        "traffic_profile": batch.traffic_profile,
-        "output_dir": str(batch.output_dir),
-        "started_at": batch.started_at,
-        "ended_at": batch.ended_at,
-        "total_scenarios": len(batch.scenario_ids),
-        "succeeded": batch.succeeded,
-        "failed": batch.failed,
-        "scenario_ids": list(batch.scenario_ids),
-        "scenarios": [asdict(outcome) for outcome in batch.outcomes],
-    }
-    batch.summary_path.write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    return batch.summary_path
-
-
-def run_local_lab_batch(
-    *,
-    scenario_ids: list[str],
-    output_dir: Path,
-    target_net: str,
-    traffic_profile: str,
-    dry_run: bool = False,
-) -> BatchLabRunResult:
-    """Execute multiple local scenarios; continue after individual failures."""
-    started_at = _utc_now_iso()
-    outcomes: list[ScenarioRunOutcome] = []
-
-    for scenario_id in scenario_ids:
-        scenario_output_dir = output_dir / scenario_id
-        try:
-            result = run_local_lab(
-                scenario_id=scenario_id,
-                output_dir=scenario_output_dir,
-                target_net=target_net,
-                traffic_profile=traffic_profile,
-                dry_run=dry_run,
-            )
-            outcomes.append(_lab_result_to_outcome(result))
-        except Exception as exc:
-            outcomes.append(_failure_outcome(scenario_id, exc))
-
-    batch = BatchLabRunResult(
-        mode="local",
-        traffic_profile=traffic_profile,
-        output_dir=output_dir,
-        scenario_ids=scenario_ids,
-        started_at=started_at,
-        ended_at=_utc_now_iso(),
-        summary_path=output_dir / SUMMARY_FILENAME,
-        outcomes=outcomes,
-    )
-    write_summary_json(batch)
-    return batch
-
-
-def run_webshell_lab_batch(
-    *,
-    scenario_ids: list[str],
-    output_dir: Path,
-    target_net: str,
-    traffic_profile: str,
-    webshell_family: str,
-    webshell_url: str,
-    remote_work_dir: str,
-    verify_tls: bool,
-    harmless_commands: Sequence[str],
-) -> BatchLabRunResult:
-    """Execute multiple webshell scenarios; continue after individual failures."""
-    started_at = _utc_now_iso()
-    outcomes: list[ScenarioRunOutcome] = []
-    provider = create_execution_provider(
-        "webshell",
-        webshell_family=webshell_family,
-        webshell_url=webshell_url,
-        verify_tls=verify_tls,
-        enable_healthcheck_on_connect=True,
-    )
-    exec_ctx = ExecutionContext(
-        run_id=_generate_run_id(suffix="batch"),
-        target_net=target_net,
-        dry_run=False,
-        provider_type="webshell",
-        scenario_id="batch",
-    )
-
-    try:
-        provider.prepare(exec_ctx)
-        for command in harmless_commands:
-            provider.execute_command(CommandRequest.new(command))
-
-        for scenario_id in scenario_ids:
-            run_id = _generate_run_id(suffix=scenario_id)
-            scenario_output_dir = output_dir / scenario_id
-            try:
-                result = _run_webshell_scenario(
-                    provider,
-                    scenario_id=scenario_id,
-                    output_dir=scenario_output_dir,
-                    run_id=run_id,
-                    target_net=target_net,
-                    traffic_profile=traffic_profile,
-                    remote_work_dir=remote_work_dir,
-                    preflight_done=True,
-                    harmless_commands=harmless_commands,
-                )
-                result.metadata["webshell_family"] = webshell_family
-                result.metadata["webshell_url"] = webshell_url
-                outcomes.append(_lab_result_to_outcome(result))
-            except Exception as exc:
-                outcomes.append(_failure_outcome(scenario_id, exc))
-    finally:
-        provider.cleanup(exec_ctx)
-
-    batch = BatchLabRunResult(
-        mode="webshell",
-        traffic_profile=traffic_profile,
-        output_dir=output_dir,
-        scenario_ids=scenario_ids,
-        started_at=started_at,
-        ended_at=_utc_now_iso(),
-        summary_path=output_dir / SUMMARY_FILENAME,
-        outcomes=outcomes,
-    )
-    write_summary_json(batch)
-    return batch
+MANUAL_NEXT_STEPS = (
+    "1. Check Stellar Sensor traffic visibility.",
+    "2. Check Stellar UI manually.",
+    "3. Review generated evidence files.",
+    "4. Fill in manual verification notes.",
+)
 
 
 def _print_result(result: LabRunResult) -> None:
@@ -588,29 +326,6 @@ def _print_result(result: LabRunResult) -> None:
     print("generated_files:")
     for path in result.generated_files:
         print(f"  {path}")
-    print("manual_next_steps:")
-    for step in MANUAL_NEXT_STEPS:
-        print(f"  {step}")
-
-
-def _print_batch_result(batch: BatchLabRunResult) -> None:
-    print("DSP operational lab batch run completed")
-    print(f"mode={batch.mode}")
-    print(f"traffic_profile={batch.traffic_profile}")
-    print(f"output_dir={batch.output_dir}")
-    print(f"summary_path={batch.summary_path}")
-    print(f"total_scenarios={len(batch.scenario_ids)}")
-    print(f"succeeded={batch.succeeded}")
-    print(f"failed={batch.failed}")
-    print("scenarios:")
-    for outcome in batch.outcomes:
-        line = (
-            f"  {outcome.scenario_id} status={outcome.status} "
-            f"run_id={outcome.run_id} event_count={outcome.event_count}"
-        )
-        if outcome.error:
-            line += f" error={outcome.error}"
-        print(line)
     print("manual_next_steps:")
     for step in MANUAL_NEXT_STEPS:
         print(f"  {step}")
@@ -638,22 +353,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--run-id",
         default=None,
-        help="Stable run identifier for single-scenario webshell mode.",
-    )
-    scenario_group = parser.add_mutually_exclusive_group()
-    scenario_group.add_argument(
-        "--all-scenarios",
-        action="store_true",
-        help="Run all ACTIVE scenario plugins sequentially.",
-    )
-    scenario_group.add_argument(
-        "--scenarios",
-        help="Comma-separated scenario plugin IDs for batch execution.",
+        help="Stable run identifier (default: auto-generated UTC timestamp).",
     )
     parser.add_argument(
         "--scenario",
         default=DEFAULT_SCENARIO,
-        help=f"Single scenario plugin ID (default: {DEFAULT_SCENARIO}).",
+        help=f"Scenario plugin ID (default: {DEFAULT_SCENARIO}).",
     )
     parser.add_argument(
         "--traffic-profile",
@@ -695,7 +400,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--remote-bundle-path",
         help=(
-            "Single-scenario override for remote events.jsonl path "
+            "Override remote events.jsonl path "
             "(default: <remote-work-dir>/<run_id>/events.jsonl)."
         ),
     )
@@ -715,14 +420,11 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def validate_args(
-    args: argparse.Namespace,
-) -> tuple[str | None, str, bool, tuple[str, ...], str | None, list[str], bool]:
+def validate_args(args: argparse.Namespace) -> tuple[str, str, bool, tuple[str, ...], str | None]:
+    run_id = args.run_id or _generate_run_id()
     traffic_profile = parse_traffic_profile(args.traffic_profile)
     dry_run = bool(args.dry_run)
     remote_bundle_override = args.remote_bundle_path
-    scenario_ids, batch_mode = resolve_requested_scenarios(args)
-    run_id = None if batch_mode else (args.run_id or _generate_run_id())
 
     if args.mode == "webshell":
         missing = []
@@ -732,70 +434,22 @@ def validate_args(
             missing.append("--webshell-url")
         if missing:
             raise ValueError(f"webshell mode requires: {', '.join(missing)}")
-        if not batch_mode and args.run_id is None and remote_bundle_override is None:
-            pass
         harmless_commands = _parse_harmless_commands(args.webshell_commands)
-        return (
-            run_id,
-            traffic_profile,
-            dry_run,
-            harmless_commands,
-            remote_bundle_override,
-            scenario_ids,
-            batch_mode,
-        )
+        return run_id, traffic_profile, dry_run, harmless_commands, remote_bundle_override
 
     harmless_commands = ()
-    return (
-        run_id,
-        traffic_profile,
-        dry_run,
-        harmless_commands,
-        remote_bundle_override,
-        scenario_ids,
-        batch_mode,
+    return run_id, traffic_profile, dry_run, harmless_commands, remote_bundle_override
+
+
+def run_from_args(args: argparse.Namespace) -> LabRunResult:
+    output_dir = _ensure_output_dir(args.output_dir)
+    run_id, traffic_profile, dry_run, harmless_commands, remote_bundle_override = (
+        validate_args(args)
     )
 
-
-def run_from_args(
-    args: argparse.Namespace,
-) -> LabRunResult | BatchLabRunResult:
-    output_dir = _ensure_output_dir(args.output_dir)
-    (
-        run_id,
-        traffic_profile,
-        dry_run,
-        harmless_commands,
-        remote_bundle_override,
-        scenario_ids,
-        batch_mode,
-    ) = validate_args(args)
-
-    if batch_mode:
-        if args.mode == "local":
-            return run_local_lab_batch(
-                scenario_ids=scenario_ids,
-                output_dir=output_dir,
-                target_net=args.target_net,
-                traffic_profile=traffic_profile,
-                dry_run=dry_run,
-            )
-        return run_webshell_lab_batch(
-            scenario_ids=scenario_ids,
-            output_dir=output_dir,
-            target_net=args.target_net,
-            traffic_profile=traffic_profile,
-            webshell_family=args.webshell_family,
-            webshell_url=args.webshell_url,
-            remote_work_dir=args.remote_work_dir,
-            verify_tls=args.verify_tls,
-            harmless_commands=harmless_commands,
-        )
-
-    assert run_id is not None
     if args.mode == "local":
         return run_local_lab(
-            scenario_id=scenario_ids[0],
+            scenario_id=args.scenario,
             output_dir=output_dir,
             target_net=args.target_net,
             traffic_profile=traffic_profile,
@@ -803,7 +457,7 @@ def run_from_args(
         )
 
     return run_webshell_lab(
-        scenario_id=scenario_ids[0],
+        scenario_id=args.scenario,
         output_dir=output_dir,
         run_id=run_id,
         target_net=args.target_net,
@@ -829,10 +483,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     except Exception as exc:
         print(f"lab run failed: {exc}", file=sys.stderr)
         return 1
-
-    if isinstance(result, BatchLabRunResult):
-        _print_batch_result(result)
-        return 1 if result.failed else 0
 
     _print_result(result)
     return 0

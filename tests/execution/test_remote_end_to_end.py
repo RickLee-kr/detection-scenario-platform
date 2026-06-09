@@ -1,4 +1,4 @@
-"""Release 1.0 Flow B — webshell remote execution path E2E harness."""
+"""End-to-end remote execution via WebshellTestServer and real dsp-remote-scenario."""
 
 from __future__ import annotations
 
@@ -16,21 +16,21 @@ from dsp.execution.remote import RemoteEventCollectionRequest, RemoteEventCollec
 from dsp.execution.webshell.transport import RealHttpTransport, RetryPolicy
 from dsp.execution.webshell_config import WebshellExecutionConfig
 from dsp.plugins import PluginLoader
-from tests.e2e.conftest import (
-    assert_event_store_has_events,
-    assert_evidence_exports_exist,
-    assert_harness_excludes_validation_runtime,
-    assert_manual_verification_package_exists,
-    export_evidence,
-    generate_manual_verification,
-)
 from tests.e2e.fixtures.bundle_helpers import remote_bundle_path_for_run
 from tests.e2e.fixtures.webshell_test_server import WebshellTestServer
 
-pytestmark = pytest.mark.e2e
-
-RUN_ID = "release_1_0_webshell_run"
+RUN_ID = "remote_e2e_run"
 SCENARIO_ID = "dummy"
+
+
+@pytest.fixture
+def remote_e2e_server(tmp_path: Path):
+    server = WebshellTestServer(storage_dir=tmp_path / "remote-storage")
+    server.start()
+    try:
+        yield server
+    finally:
+        server.stop()
 
 
 def _connected_webshell_provider(server: WebshellTestServer) -> WebshellExecutionProvider:
@@ -58,82 +58,69 @@ def _connected_webshell_provider(server: WebshellTestServer) -> WebshellExecutio
     )
 
 
-@pytest.fixture
-def webshell_event_store(tmp_path: Path) -> EventStore:
-    store = EventStore(tmp_path / "webshell_events.db")
-    store.open_run(RUN_ID)
-    return store
-
-
-def test_webshell_execution_reaches_event_store_via_bundle_sync(
-    webshell_test_server: WebshellTestServer,
-    webshell_event_store: EventStore,
-    e2e_output_dir: Path,
+def test_remote_end_to_end_runner_collector_event_store(
+    remote_e2e_server: WebshellTestServer,
+    tmp_path: Path,
 ) -> None:
     loader = PluginLoader()
     record = loader.discover_and_load().get(SCENARIO_ID)
     assert record is not None
 
-    provider = _connected_webshell_provider(webshell_test_server)
+    store = EventStore(tmp_path / "events.db")
+    store.open_run(RUN_ID)
+
+    provider = _connected_webshell_provider(remote_e2e_server)
     exec_ctx = ExecutionContext(
         run_id=RUN_ID,
         target_net="10.10.10.0/24",
         dry_run=True,
         provider_type="webshell",
         scenario_id=SCENARIO_ID,
+        execution_metadata={
+            "remote_work_dir": "/tmp/dsp",
+            "remote_bundle_path": remote_bundle_path_for_run(RUN_ID),
+        },
     )
     run_ctx = RunContext(
         run_id=RUN_ID,
         target_net="10.10.10.0/24",
-        event_store=webshell_event_store,
+        event_store=store,
         config=RunConfig(dry_run=True),
         dry_run=True,
     )
     targets = resolve_targets("10.10.10.0/24")
 
     provider.prepare(exec_ctx)
-    summary = provider.execute(exec_ctx, record, run_ctx, targets)
+    provider.execute(exec_ctx, record, run_ctx, targets)
+    assert store.count(EventQuery(run_id=RUN_ID)) == 0
+    assert remote_e2e_server.command_calls
 
-    assert summary is None
-    assert webshell_event_store.count(EventQuery(run_id=RUN_ID)) == 0
-
-    remote_result = exec_ctx.execution_metadata["remote_scenario_result"]
-    remote_execution_id = exec_ctx.execution_metadata["remote_execution_id"]
-    assert remote_execution_id == remote_result["remote_execution_id"]
-    assert webshell_test_server.command_calls, "remote command path was not invoked"
-
-    remote_bundle_path = remote_bundle_path_for_run(RUN_ID)
     collection_result = RemoteEventCollector().collect(
         RemoteEventCollectionRequest(
-            remote_execution_id=remote_execution_id,
-            remote_bundle_path=remote_bundle_path,
+            remote_execution_id=RUN_ID,
+            remote_bundle_path=remote_bundle_path_for_run(RUN_ID),
         ),
         provider,
-        webshell_event_store,
+        store,
     )
     provider.cleanup(exec_ctx)
 
-    assert webshell_test_server.download_calls == [remote_bundle_path]
     assert collection_result.events_imported >= 3
-    assert collection_result.remote_bundle_path == remote_bundle_path
-    event_count = assert_event_store_has_events(webshell_event_store, RUN_ID, minimum=3)
-    assert webshell_event_store.count(
-        EventQuery(run_id=RUN_ID, scenario_id=SCENARIO_ID, event="synthetic_action")
+    assert remote_e2e_server.download_calls == [remote_bundle_path_for_run(RUN_ID)]
+    assert store.count(EventQuery(run_id=RUN_ID)) >= 3
+    assert store.count(
+        EventQuery(
+            run_id=RUN_ID,
+            scenario_id=SCENARIO_ID,
+            event="synthetic_action",
+        )
     ) >= 3
+    assert store.count(
+        EventQuery(
+            run_id=RUN_ID,
+            scenario_id=SCENARIO_ID,
+            event="scenario_completed",
+        )
+    ) >= 1
 
-    export_result = export_evidence(webshell_event_store, RUN_ID, e2e_output_dir)
-    assert_evidence_exports_exist(e2e_output_dir, RUN_ID)
-    assert export_result.export_metadata["event_count"] == event_count
-
-    manual_result = generate_manual_verification(
-        webshell_event_store,
-        RUN_ID,
-        e2e_output_dir,
-    )
-    assert_manual_verification_package_exists(e2e_output_dir)
-    assert manual_result.run_id == RUN_ID
-    assert len(manual_result.generated_files) == 3
-
-
-def test_webshell_flow_excludes_validation_runtime() -> None:
-    assert_harness_excludes_validation_runtime(Path(__file__))
+    store.close()

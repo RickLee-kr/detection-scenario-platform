@@ -10,13 +10,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from dsp.lab import operational_runner
-from dsp.lab.operational_runner import (
-    BatchLabRunResult,
-    LabRunResult,
-    resolve_active_scenario_ids,
-    run_local_lab_batch,
-    write_summary_json,
-)
 from dsp.runtime.traffic_profiles import build_scenario_params
 
 
@@ -92,7 +85,11 @@ def test_local_mode_dummy_safe_with_dry_run(tmp_path: Path) -> None:
 
 
 def test_webshell_command_includes_profile_parameters() -> None:
-    from dsp.execution.remote.payload import REMOTE_SCENARIO_COMMAND, build_scenario_command
+    from dsp.execution.remote.payload import (
+        REMOTE_SCENARIO_COMMAND,
+        build_scenario_command,
+        decode_scenario_payload,
+    )
     from dsp.execution.remote.models import ScenarioExecutionRequest
     from dsp.runtime.traffic_profiles import scenario_params_for_profile
 
@@ -106,69 +103,7 @@ def test_webshell_command_includes_profile_parameters() -> None:
     )
     command = build_scenario_command(request)
     assert command.command == REMOTE_SCENARIO_COMMAND
-    payload = json.loads(command.arguments[0])
+    payload = decode_scenario_payload(command.arguments[0])
     assert payload["scenario_params"]["traffic_profile"] == "balanced"
     assert payload["dry_run"] is False
     assert payload["scenario_id"] == "dns_tunnel"
-
-
-def test_resolve_active_scenario_ids_returns_twelve_plugins() -> None:
-    scenario_ids = resolve_active_scenario_ids()
-    assert len(scenario_ids) == 12
-    assert "dummy" in scenario_ids
-    assert "dns_tunnel" in scenario_ids
-
-
-def test_local_batch_continues_after_failure(tmp_path: Path) -> None:
-    output_dir = tmp_path / "batch-local"
-    calls: list[str] = []
-
-    def fake_run_local_lab(**kwargs: object) -> LabRunResult:
-        scenario_id = str(kwargs["scenario_id"])
-        calls.append(scenario_id)
-        if scenario_id == "bad_scenario":
-            raise RuntimeError("simulated failure")
-        run_dir = Path(str(kwargs["output_dir"])) / "run_ok"
-        run_dir.mkdir(parents=True, exist_ok=True)
-        return LabRunResult(
-            mode="local",
-            scenario=scenario_id,
-            traffic_profile="balanced",
-            run_id=f"run_{scenario_id}",
-            output_dir=Path(str(kwargs["output_dir"])),
-            run_dir=run_dir,
-            event_count=3,
-        )
-
-    with patch.object(operational_runner, "run_local_lab", side_effect=fake_run_local_lab):
-        batch = run_local_lab_batch(
-            scenario_ids=["dummy", "bad_scenario", "dns_dummy"],
-            output_dir=output_dir,
-            target_net="10.10.10.0/24",
-            traffic_profile="balanced",
-            dry_run=True,
-        )
-
-    assert calls == ["dummy", "bad_scenario", "dns_dummy"]
-    assert batch.succeeded == 2
-    assert batch.failed == 1
-    assert batch.summary_path.is_file()
-    summary = json.loads(batch.summary_path.read_text(encoding="utf-8"))
-    assert summary["total_scenarios"] == 3
-    assert summary["failed"] == 1
-    assert summary["scenarios"][1]["status"] == "failed"
-
-
-def test_write_summary_json_records_outcomes(tmp_path: Path) -> None:
-    batch = BatchLabRunResult(
-        mode="local",
-        traffic_profile="low",
-        output_dir=tmp_path,
-        scenario_ids=["dummy"],
-        started_at="2026-06-09T00:00:00Z",
-        ended_at="2026-06-09T00:01:00Z",
-        summary_path=tmp_path / "summary.json",
-        outcomes=[],
-    )
-    write_summary_json(batch)
-    assert batch.summary_path.is_file()

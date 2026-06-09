@@ -15,6 +15,7 @@ dev = [
 
 [project.scripts]
 dsp = "dsp.runner.cli:main"
+dsp-remote-scenario = "dsp.runner.remote_scenario_cli:main"
 
 [build-system]
 requires = ["hatchling"]

@@ -33,6 +33,7 @@ from dsp.execution.remote import (
     UnsupportedRemoteProviderError,
     build_scenario_command,
 )
+from dsp.execution.remote.payload import decode_scenario_payload
 from dsp.execution.webshell_config import WebshellExecutionConfig
 from dsp.execution.webshell.transport import RealHttpTransport, RetryPolicy
 from dsp.execution.webshell.transport.real_http_transport import HttpBackendResponse
@@ -56,6 +57,25 @@ FAMILY_CASES = [
     pytest.param("php", PhpWebshellProvider, "shell.php", id="php"),
     pytest.param("aspx", AspxWebshellProvider, "shell.aspx", id="aspx"),
 ]
+
+
+def _decoded_payload_from_dispatch(dispatched: dict[str, object]) -> dict:
+    import urllib.parse
+
+    url = str(dispatched.get("url", ""))
+    body = dispatched.get("body")
+    if body:
+        params = urllib.parse.parse_qs(body.decode("utf-8"))
+        argument = params.get("cmd", [""])[0]
+        if argument.startswith(REMOTE_SCENARIO_COMMAND):
+            argument = argument[len(REMOTE_SCENARIO_COMMAND) + 1 :]
+        return decode_scenario_payload(argument)
+    query = urllib.parse.urlparse(url).query
+    params = urllib.parse.parse_qs(query)
+    argument = params.get("cmd", [""])[0]
+    if argument.startswith(REMOTE_SCENARIO_COMMAND):
+        argument = argument[len(REMOTE_SCENARIO_COMMAND) + 1 :]
+    return decode_scenario_payload(urllib.parse.unquote_plus(argument))
 
 
 @dataclass
@@ -163,7 +183,7 @@ def test_build_scenario_command_uses_remote_dispatcher():
 
 def test_build_scenario_command_embeds_scenario_id():
     command = build_scenario_command(_request(scenario_id="dns_tunnel"))
-    payload = json.loads(command.arguments[0])
+    payload = decode_scenario_payload(command.arguments[0])
     assert payload["scenario_id"] == "dns_tunnel"
 
 
@@ -171,7 +191,7 @@ def test_build_scenario_command_propagates_scenario_params():
     command = build_scenario_command(
         _request(scenario_params={"action_count": 7, "interval_ms": 100})
     )
-    payload = json.loads(command.arguments[0])
+    payload = decode_scenario_payload(command.arguments[0])
     assert payload["scenario_params"] == {"action_count": 7, "interval_ms": 100}
 
 
@@ -179,7 +199,7 @@ def test_build_scenario_command_propagates_execution_metadata():
     command = build_scenario_command(
         _request(execution_metadata={"webshell_family": "jsp", "lab": "poc"})
     )
-    payload = json.loads(command.arguments[0])
+    payload = decode_scenario_payload(command.arguments[0])
     assert payload["execution_metadata"]["webshell_family"] == "jsp"
     assert payload["execution_metadata"]["lab"] == "poc"
 
@@ -188,7 +208,7 @@ def test_build_scenario_command_propagates_run_context_fields():
     command = build_scenario_command(
         _request(run_id="run99", target_net="192.168.1.0/24", dry_run=True)
     )
-    payload = json.loads(command.arguments[0])
+    payload = decode_scenario_payload(command.arguments[0])
     assert payload["run_id"] == "run99"
     assert payload["target_net"] == "192.168.1.0/24"
     assert payload["dry_run"] is True
@@ -355,10 +375,9 @@ def test_scenario_params_reach_remote_command(family, provider_cls, filename):
         provider,
     )
     dispatched = backend.calls[-1]
-    url_or_body = str(dispatched.get("url", "")) + str(dispatched.get("body", b""))
-    assert "action_count" in url_or_body
-    assert "9" in url_or_body
-    assert "mode" in url_or_body
+    payload = _decoded_payload_from_dispatch(dispatched)
+    assert payload["scenario_params"]["action_count"] == 9
+    assert payload["scenario_params"]["mode"] == "lab"
 
 
 @pytest.mark.parametrize("family,provider_cls,filename", FAMILY_CASES)
@@ -370,9 +389,9 @@ def test_execution_metadata_reaches_remote_command(family, provider_cls, filenam
         provider,
     )
     dispatched = backend.calls[-1]
-    url_or_body = str(dispatched.get("url", "")) + str(dispatched.get("body", b""))
-    assert "webshell_family" in url_or_body
-    assert family in url_or_body
+    payload = _decoded_payload_from_dispatch(dispatched)
+    assert payload["execution_metadata"]["webshell_family"] == family
+    assert payload["execution_metadata"]["lab"] == "xdr"
 
 
 @pytest.mark.parametrize("family,provider_cls,filename", FAMILY_CASES)

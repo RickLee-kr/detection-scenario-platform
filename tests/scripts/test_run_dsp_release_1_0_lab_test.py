@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import re
 import subprocess
 import sys
 from pathlib import Path
 
-from dsp.lab.operational_runner import resolve_active_scenario_ids
 from tests.e2e.fixtures.bundle_helpers import remote_bundle_path_for_run
 from tests.e2e.fixtures.webshell_test_server import WebshellTestServer
 
@@ -33,8 +31,6 @@ def test_help_works() -> None:
     assert result.returncode == 0
     assert "--mode" in result.stdout
     assert "--traffic-profile" in result.stdout
-    assert "--all-scenarios" in result.stdout
-    assert "--scenarios" in result.stdout
     assert "local" in result.stdout
     assert "webshell" in result.stdout
 
@@ -173,96 +169,6 @@ def test_webshell_mode_creates_expected_files(tmp_path: Path) -> None:
     assert server.command_calls[:3] == ["whoami", "hostname", "pwd"]
     assert any(call.startswith("dsp-remote-scenario ") for call in server.command_calls)
     assert remote_bundle_path_for_run(RUN_ID) in server.download_calls
-
-
-def test_all_scenarios_local_dry_run_creates_summary(tmp_path: Path) -> None:
-    output_dir = tmp_path / "dsp-all-local"
-    result = _run_script(
-        "--mode",
-        "local",
-        "--all-scenarios",
-        "--traffic-profile",
-        "low",
-        "--dry-run",
-        "--output-dir",
-        str(output_dir),
-    )
-    assert result.returncode == 0, result.stderr
-    assert "summary_path=" in result.stdout
-    assert f"total_scenarios={len(resolve_active_scenario_ids())}" in result.stdout
-
-    summary_path = output_dir / "summary.json"
-    assert summary_path.is_file()
-    summary = json.loads(summary_path.read_text(encoding="utf-8"))
-    assert summary["mode"] == "local"
-    assert summary["traffic_profile"] == "low"
-    assert summary["total_scenarios"] == 12
-    assert summary["succeeded"] == 12
-    assert summary["failed"] == 0
-
-    for scenario_id in resolve_active_scenario_ids():
-        scenario_root = output_dir / scenario_id
-        assert scenario_root.is_dir(), f"missing scenario directory: {scenario_root}"
-        run_dirs = [p for p in scenario_root.iterdir() if p.is_dir()]
-        assert run_dirs, f"missing run directory under {scenario_root}"
-        run_dir = run_dirs[0]
-        assert (run_dir / "verification_checklist.md").is_file()
-        assert (run_dir / f"run_{run_dir.name}.json").is_file()
-
-
-def test_scenarios_list_local_batch(tmp_path: Path) -> None:
-    output_dir = tmp_path / "dsp-list-local"
-    result = _run_script(
-        "--mode",
-        "local",
-        "--scenarios",
-        "dummy,dns_dummy",
-        "--traffic-profile",
-        "balanced",
-        "--dry-run",
-        "--output-dir",
-        str(output_dir),
-        check=True,
-    )
-    assert "total_scenarios=2" in result.stdout
-    summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
-    assert summary["scenario_ids"] == ["dummy", "dns_dummy"]
-
-
-def test_webshell_all_scenarios_batch(tmp_path: Path) -> None:
-    output_dir = tmp_path / "dsp-all-webshell"
-    storage_dir = tmp_path / "remote-storage"
-    remote_work_dir = "/tmp/dsp"
-
-    server = WebshellTestServer(storage_dir=storage_dir)
-    server.start()
-    try:
-        result = _run_script(
-            "--mode",
-            "webshell",
-            "--scenarios",
-            "dummy,dns_dummy",
-            "--traffic-profile",
-            "balanced",
-            "--webshell-family",
-            "jsp",
-            "--webshell-url",
-            server.webshell_url,
-            "--remote-work-dir",
-            remote_work_dir,
-            "--output-dir",
-            str(output_dir),
-            check=True,
-        )
-    finally:
-        server.stop()
-
-    assert result.returncode == 0
-    summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
-    assert summary["mode"] == "webshell"
-    assert summary["succeeded"] == 2
-    assert server.command_calls[:3] == ["whoami", "hostname", "pwd"]
-    assert sum(1 for call in server.command_calls if call.startswith("dsp-remote-scenario ")) == 2
 
 
 def test_webshell_mode_rejects_disallowed_command(tmp_path: Path) -> None:
