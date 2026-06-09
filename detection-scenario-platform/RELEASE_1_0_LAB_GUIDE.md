@@ -104,9 +104,59 @@ store.close()
 
 ---
 
+## 2.5 Operational Lab Runner (DSP v1.1.0)
+
+DSP v1.1.0 adds an operator lab runner with **host direct** and **webshell remote** operational traffic execution, traffic profiles (`low` / `balanced` / `burst`), evidence export, and manual verification templates.
+
+**Default behavior:** local mode runs **live traffic** (not dry-run). Use `--dry-run` only for safe automated tests.
+
+### Host direct operational test
+
+```bash
+python scripts/run_dsp_release_1_0_lab_test.py \
+  --mode local \
+  --scenario dns_tunnel \
+  --traffic-profile balanced \
+  --target-net 10.10.10.0/24 \
+  --output-dir /tmp/dsp-host-test
+```
+
+### Webshell operational test
+
+```bash
+python scripts/run_dsp_release_1_0_lab_test.py \
+  --mode webshell \
+  --scenario dns_tunnel \
+  --traffic-profile balanced \
+  --webshell-family jsp \
+  --webshell-url http://TARGET/shell.jsp \
+  --remote-work-dir /tmp/dsp \
+  --output-dir /tmp/dsp-webshell-test
+```
+
+### Traffic profiles
+
+| Profile | Use case |
+|---------|----------|
+| `low` | Conservative volume — first connectivity check |
+| `balanced` | Default operational test profile |
+| `burst` | High volume — short, aggressive generation |
+
+### Manual Stellar verification checklist
+
+After each operational run, complete these steps manually. DSP does **not** validate detection success.
+
+- [ ] Confirm runner source IP appears in Stellar Sensor traffic visibility
+- [ ] Search Stellar UI for traffic in the run time window
+- [ ] Review `run_<run_id>.json` and `run_<run_id>.md` evidence exports
+- [ ] Fill in `investigation_notes.md` and `verification_checklist.md`
+- [ ] Record operator notes — do not infer attack or detection success from DSP output
+
+---
+
 ## 3. Webshell Remote Execution — Manual Verification
 
-Webshell execution is composed via Python API in Release 1.0. Use a lab script or interactive session.
+Webshell execution is available via the operational lab runner (§2.5) or Python API composition below.
 
 ### 3.1 Configuration
 

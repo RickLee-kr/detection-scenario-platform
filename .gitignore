@@ -11,6 +11,8 @@ logs/
 *.log
 *.log.*
 runtime/
+!detection-scenario-platform/dsp/runtime/
+!detection-scenario-platform/dsp/runtime/**
 
 # --- Secrets / local environment -------------------------------------
 .env

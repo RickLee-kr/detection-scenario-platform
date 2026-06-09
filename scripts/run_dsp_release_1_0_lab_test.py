@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""DSP operational lab runner — host direct and webshell remote execution."""
+"""DSP operational lab runner — workspace wrapper for detection-scenario-platform."""
 
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
-_DSP_ROOT = Path(__file__).resolve().parent.parent
+_DSP_ROOT = Path(__file__).resolve().parent.parent / "detection-scenario-platform"
 if str(_DSP_ROOT) not in sys.path:
     sys.path.insert(0, str(_DSP_ROOT))
 

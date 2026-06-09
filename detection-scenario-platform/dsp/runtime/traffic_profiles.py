@@ -1,0 +1,177 @@
+"""Central traffic profile mapping — volume/timing only, no detection logic."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+SUPPORTED_TRAFFIC_PROFILES = frozenset({"low", "balanced", "burst"})
+
+# Per-scenario parameter templates keyed by operational profile name.
+# Explicit scenario_params passed at run time always override these values.
+_SCENARIO_PROFILE_PARAMS: dict[str, dict[str, dict[str, Any]]] = {
+    "dummy": {
+        "low": {"action_count": 3},
+        "balanced": {"action_count": 10},
+        "burst": {"action_count": 25},
+    },
+    "dns_tunnel": {
+        "low": {
+            "volume_profile": "demo",
+            "payload_mb": 0.0001,
+            "max_chunks": 5,
+            "max_hosts": 1,
+            "timeout": 0.1,
+        },
+        "balanced": {
+            "volume_profile": "standard",
+            "payload_mb": 0.01,
+            "max_chunks": 50,
+            "max_hosts": 1,
+            "timeout": 0.05,
+        },
+        "burst": {
+            "volume_profile": "stress",
+            "payload_mb": 0.5,
+            "max_chunks": 150,
+            "max_hosts": 2,
+            "chunk_size": 30,
+            "max_duration_sec": 120,
+            "timeout": 0.05,
+        },
+    },
+    "dga": {
+        "low": {"phase1_count": 3, "phase2_count": 2, "timeout": 0.1},
+        "balanced": {"phase1_count": 10, "phase2_count": 5, "timeout": 0.05},
+        "burst": {"phase1_count": 30, "phase2_count": 15, "timeout": 0.05},
+    },
+    "http_followup": {
+        "low": {"max_hosts": 1, "max_per_host": 3, "max_total": 5, "timeout": 15.0},
+        "balanced": {"max_hosts": 2, "max_per_host": 10, "max_total": 20, "timeout": 10.0},
+        "burst": {"max_hosts": 3, "max_per_host": 30, "max_total": 60, "timeout": 5.0},
+    },
+    "ssh_failure": {
+        "low": {"max_hosts": 1, "max_per_host": 5, "max_total": 5, "timeout": 15.0},
+        "balanced": {"max_hosts": 2, "max_per_host": 15, "max_total": 25, "timeout": 10.0},
+        "burst": {"max_hosts": 2, "max_per_host": 30, "max_total": 50, "timeout": 5.0},
+    },
+    "sql_injection": {
+        "low": {"max_hosts": 1, "max_per_host": 3, "max_total": 5, "timeout": 15.0},
+        "balanced": {"max_hosts": 2, "max_per_host": 10, "max_total": 20, "timeout": 10.0},
+        "burst": {"max_hosts": 3, "max_per_host": 25, "max_total": 50, "timeout": 5.0},
+    },
+    "port_sweep": {
+        "low": {"max_hosts": 1, "max_ports": 5, "timeout": 5.0},
+        "balanced": {"max_hosts": 2, "max_ports": 15, "timeout": 3.0},
+        "burst": {"max_hosts": 3, "max_ports": 30, "timeout": 2.0},
+    },
+    "kerberos_failure": {
+        "low": {"max_hosts": 1, "attempts_per_host": 3, "timeout": 15.0},
+        "balanced": {"max_hosts": 2, "attempts_per_host": 10, "timeout": 10.0},
+        "burst": {"max_hosts": 2, "attempts_per_host": 25, "timeout": 5.0},
+    },
+    "smb_login_failure": {
+        "low": {"max_hosts": 1, "attempts_per_host": 3, "timeout": 15.0},
+        "balanced": {"max_hosts": 2, "attempts_per_host": 10, "timeout": 10.0},
+        "burst": {"max_hosts": 2, "attempts_per_host": 25, "timeout": 5.0},
+    },
+    "ldap_enumeration": {
+        "low": {"max_hosts": 1, "max_queries_per_host": 3, "timeout": 15.0},
+        "balanced": {"max_hosts": 2, "max_queries_per_host": 8, "timeout": 10.0},
+        "burst": {"max_hosts": 2, "max_queries_per_host": 20, "timeout": 5.0},
+    },
+    "dns_dummy": {
+        "low": {"query_count": 3},
+        "balanced": {"query_count": 8},
+        "burst": {"query_count": 20},
+    },
+    "dns_transport_dummy": {
+        "low": {"query_count": 3},
+        "balanced": {"query_count": 8},
+        "burst": {"query_count": 20},
+    },
+}
+
+_PROFILE_META: dict[str, dict[str, Any]] = {
+    "low": {
+        "description": "Conservative traffic volume for first connectivity checks.",
+        "intensity": 1,
+    },
+    "balanced": {
+        "description": "Moderate traffic volume — default operational test profile.",
+        "intensity": 2,
+    },
+    "burst": {
+        "description": "High traffic volume — short, aggressive generation with bounded duration.",
+        "intensity": 3,
+    },
+}
+
+
+@dataclass(frozen=True)
+class TrafficProfile:
+    """Operational traffic profile — controls generation volume and timing only."""
+
+    name: str
+    description: str
+    intensity: int
+    scenario_params: dict[str, Any]
+
+
+def parse_traffic_profile(name: str) -> str:
+    """Normalize and validate a traffic profile name."""
+    normalized = name.strip().lower()
+    if normalized not in SUPPORTED_TRAFFIC_PROFILES:
+        supported = ", ".join(sorted(SUPPORTED_TRAFFIC_PROFILES))
+        raise ValueError(
+            f"unknown traffic profile: {name!r}; choose from {supported}"
+        )
+    return normalized
+
+
+def resolve_traffic_profile(name: str) -> TrafficProfile:
+    """Return profile metadata without scenario-specific parameter mapping."""
+    profile_name = parse_traffic_profile(name)
+    meta = _PROFILE_META[profile_name]
+    return TrafficProfile(
+        name=profile_name,
+        description=str(meta["description"]),
+        intensity=int(meta["intensity"]),
+        scenario_params={},
+    )
+
+
+def scenario_params_for_profile(scenario_id: str, profile_name: str) -> dict[str, Any]:
+    """Map a traffic profile to scenario-specific execution parameters."""
+    profile = parse_traffic_profile(profile_name)
+    scenario_map = _SCENARIO_PROFILE_PARAMS.get(scenario_id)
+    if scenario_map is None:
+        return {"traffic_profile": profile}
+    params = dict(scenario_map.get(profile, {}))
+    params["traffic_profile"] = profile
+    return params
+
+
+def build_scenario_params(
+    scenario_id: str,
+    profile_name: str,
+    *,
+    overrides: dict[str, Any] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Build RunManager-compatible scenario_params for a single scenario."""
+    params = scenario_params_for_profile(scenario_id, profile_name)
+    if overrides:
+        params = {**params, **overrides}
+    return {scenario_id: params}
+
+
+def profile_for_scenario(scenario_id: str, profile_name: str) -> TrafficProfile:
+    """Return a TrafficProfile including scenario-specific parameter mapping."""
+    base = resolve_traffic_profile(profile_name)
+    params = scenario_params_for_profile(scenario_id, profile_name)
+    return TrafficProfile(
+        name=base.name,
+        description=base.description,
+        intensity=base.intensity,
+        scenario_params=params,
+    )

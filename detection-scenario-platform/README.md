@@ -1,6 +1,6 @@
 # Detection Scenario Platform (DSP)
 
-**Release 1.0.0** — Core platform, local + webshell execution providers, evidence export, manual verification templates, E2E harness.
+**Release 1.1.0** — Operational traffic execution (host direct + webshell remote), traffic profiles, evidence export, manual verification templates, E2E harness.
 
 | Release docs | |
 |--------------|--|
@@ -61,10 +61,38 @@
 
 ## 상태
 
-- **Release 1.0.0:** Core platform, execution providers, evidence export, manual verification, E2E harness
-- **Local execution:** `dsp run` via `LocalExecutionProvider`
-- **Webshell execution:** API composition (`WebshellExecutionProvider` + `RemoteEventCollector`)
+- **Release 1.1.0:** Operational lab runner, traffic profiles (`low`/`balanced`/`burst`), host direct + webshell remote execution
+- **Local execution:** `dsp run` or operational lab runner (`--mode local`)
+- **Webshell execution:** operational lab runner (`--mode webshell`) or API composition
 - **통합:** Deployment automation 연동 미착수
+
+### Operational lab testing (v1.1.0)
+
+Host direct:
+
+```bash
+python scripts/run_dsp_release_1_0_lab_test.py \
+  --mode local \
+  --scenario dns_tunnel \
+  --traffic-profile balanced \
+  --target-net 10.10.10.0/24 \
+  --output-dir /tmp/dsp-host-test
+```
+
+Webshell remote:
+
+```bash
+python scripts/run_dsp_release_1_0_lab_test.py \
+  --mode webshell \
+  --scenario dns_tunnel \
+  --traffic-profile balanced \
+  --webshell-family jsp \
+  --webshell-url http://TARGET/shell.jsp \
+  --remote-work-dir /tmp/dsp \
+  --output-dir /tmp/dsp-webshell-test
+```
+
+Manual Stellar verification: check Sensor traffic visibility, review Stellar UI, inspect evidence exports, complete `verification_checklist.md`. DSP does not validate detection success automatically.
 
 ---
 
