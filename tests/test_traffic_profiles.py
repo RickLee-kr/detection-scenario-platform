@@ -61,4 +61,5 @@ def test_build_scenario_params_applies_overrides() -> None:
 def test_profile_for_scenario_includes_scenario_params() -> None:
     profile = profile_for_scenario("http_followup", "high")
     assert profile.name == "high"
-    assert profile.scenario_params["max_total"] == 60
+    assert profile.scenario_params["max_total"] == 300
+    assert profile.scenario_params["max_hosts"] == 1

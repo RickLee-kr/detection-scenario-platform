@@ -51,9 +51,30 @@ _SCENARIO_PROFILE_PARAMS: dict[str, dict[str, dict[str, Any]]] = {
         "high": {"phase1_count": 30, "phase2_count": 15, "timeout": 0.05},
     },
     "http_followup": {
-        "low": {"max_hosts": 1, "max_per_host": 40, "max_total": 40, "timeout": 15.0, "include_attack_paths": True},
-        "normal": {"max_hosts": 2, "max_per_host": 150, "max_total": 300, "timeout": 10.0, "include_attack_paths": True},
-        "high": {"max_hosts": 3, "max_per_host": 30, "max_total": 60, "timeout": 5.0, "include_attack_paths": True},
+        "low": {
+            "max_hosts": 1,
+            "max_per_host": 40,
+            "max_total": 40,
+            "timeout": 2.0,
+            "concurrency": 32,
+            "include_attack_paths": True,
+        },
+        "normal": {
+            "max_hosts": 1,
+            "max_per_host": 300,
+            "max_total": 300,
+            "timeout": 2.0,
+            "concurrency": 32,
+            "include_attack_paths": True,
+        },
+        "high": {
+            "max_hosts": 1,
+            "max_per_host": 300,
+            "max_total": 300,
+            "timeout": 2.0,
+            "concurrency": 32,
+            "include_attack_paths": True,
+        },
     },
     "ssh_failure": {
         "low": {"max_hosts": 1, "max_per_host": 30, "max_total": 30, "timeout": 5.0},

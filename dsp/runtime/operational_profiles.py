@@ -173,6 +173,9 @@ def build_operational_scenario_params(
         if scenario_id == "port_sweep":
             merged["max_hosts"] = min(254, host_count)
             merged["max_ports"] = 10
+        if scenario_id == "http_followup":
+            # Bash URL scan concentrates on one scored target; traffic profile caps hosts.
+            merged["max_hosts"] = int(base.get("max_hosts", 1))
         params[scenario_id] = merged
     return params
 

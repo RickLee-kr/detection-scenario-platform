@@ -64,12 +64,19 @@ def test_plan_followup_requires_host():
 
 
 def test_planned_request_url_property():
-    from dsp.protocols.http.urls import ATTACK_SCAN_PATHS
+    from dsp.protocols.http.urls import ATTACK_SCAN_PATHS, MANDATORY_PAYLOAD_PATHS
 
     plans = plan_followup_requests(["lab.local"], max_total=1)
-    assert plans[0].path in ATTACK_SCAN_PATHS
+    assert plans[0].path in MANDATORY_PAYLOAD_PATHS or plans[0].path in ATTACK_SCAN_PATHS
     assert plans[0].url.startswith("http://")
     assert plans[0].port == 80
+    assert plans[0].query.startswith("?")
+
+
+def test_plan_followup_includes_bad_query_strings():
+    plans = plan_followup_requests(["10.10.10.20"], max_total=10)
+    assert all(p.query.startswith("?") for p in plans)
+    assert any("WEB-INF" in p.query or "passwd" in p.query or "%00" in p.query for p in plans)
 
 
 def test_plan_followup_cycles_paths_for_volume():
@@ -79,9 +86,10 @@ def test_plan_followup_cycles_paths_for_volume():
 
 
 def test_plan_followup_includes_attack_paths_by_default():
-    from dsp.protocols.http.urls import ATTACK_SCAN_PATHS
+    from dsp.protocols.http.urls import MANDATORY_PAYLOAD_PATHS, PAYLOAD_RECON_PATHS
 
     plans = plan_followup_requests(["10.10.10.20"], max_per_host=20, max_total=20)
     planned_paths = {p.path for p in plans}
-    assert ATTACK_SCAN_PATHS[0] in planned_paths
+    assert MANDATORY_PAYLOAD_PATHS[0] in planned_paths
     assert "/.env" in planned_paths or "/WEB-INF/web.xml" in planned_paths
+    assert any(p in PAYLOAD_RECON_PATHS for p in planned_paths)

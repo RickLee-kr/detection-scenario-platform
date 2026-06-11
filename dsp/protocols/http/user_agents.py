@@ -1,11 +1,11 @@
-"""HTTP User-Agent pools — ported from stellar_poc_followup.sh http_ua_pick_*."""
+"""HTTP User-Agent pools — stellar_poc_followup.sh parity."""
 
 from __future__ import annotations
 
 import random
 import re
 
-# stellar_poc_followup.sh: url_scan burst 0% normal / 50% rare / 50% payload (roll < 10 normal)
+# stellar_poc_followup.sh http_ua_pick_normal_local
 _UA_NORMAL = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -13,6 +13,7 @@ _UA_NORMAL = (
     "(KHTML, like Gecko) Version/17.0 Safari/605.1.15",
 )
 
+# stellar_poc_followup.sh http_ua_pick_rare_scanner_local
 _UA_RARE = (
     "TelemetryCollector/9.7",
     "ReconEngine/5.4",
@@ -63,6 +64,13 @@ _PAYLOAD_OTHER = (
     "<<<<>>>>",
 )
 
+# bash remote python fallback payload_parts (subset)
+_PAYLOAD_JNDI = (
+    "${jndi:ldap://127.0.0.1/a}",
+    "${jndi:rmi://127.0.0.1/exploit}",
+    "${jndi:dns://127.0.0.1/x}",
+)
+
 _RE_SQLI = re.compile(
     r"OR 1=1|pg_sleep|waitfor delay|convert\(int|'='|2\+701",
     re.IGNORECASE,
@@ -96,6 +104,24 @@ def pick_payload_fragment() -> str:
     return random.choice(_PAYLOAD_OTHER)
 
 
+def pick_payload_user_agent() -> str:
+    """Bash pick_payload_ua — rare+payload or payload-only."""
+    if random.randrange(2) == 0:
+        return f"{pick_rare_user_agent()} {pick_payload_fragment()}"
+    return pick_payload_fragment()
+
+
+def pick_burst_user_agent() -> str:
+    """
+    Bash pick_burst_ua for url_scan — normal_ua_allowed=no.
+
+    50% rare scanner UA, 50% payload UA (no normal browser UA).
+    """
+    if random.randrange(2) == 0:
+        return pick_rare_user_agent()
+    return pick_payload_user_agent()
+
+
 def pick_user_agent() -> str:
     """Bash http_ua_pick_local — 10% normal, 40% rare, 50% payload."""
     roll = random.randrange(100)
@@ -103,9 +129,7 @@ def pick_user_agent() -> str:
         return pick_normal_user_agent()
     if roll < 50:
         return pick_rare_user_agent()
-    if random.randrange(2) == 0:
-        return f"{pick_rare_user_agent()} {pick_payload_fragment()}"
-    return pick_payload_fragment()
+    return pick_payload_user_agent()
 
 
 def classify_user_agent(ua: str) -> str:

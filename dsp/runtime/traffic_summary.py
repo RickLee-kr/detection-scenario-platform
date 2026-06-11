@@ -113,6 +113,7 @@ def build_traffic_summary(
                 "concurrency": started.get("concurrency") or completed.get("concurrency"),
             })
         elif sid == "http_followup":
+            dump_summary = completed.get("request_dump_summary") or {}
             scenario_summary.update({
                 "requests_planned": started.get("planned_requests", 0),
                 "requests_sent": completed.get("request_count") or _count_events(events, sid, "http_request_sent"),
@@ -128,6 +129,15 @@ def build_traffic_summary(
                 "https_targets": completed.get("https_targets") or started.get("https_targets", []),
                 "skipped_no_http_service": skipped.get("skipped_no_http_service", False),
                 "duration_sec": completed.get("duration_sec"),
+                "concurrency": started.get("concurrency") or completed.get("concurrency"),
+                "requests_per_second": completed.get("requests_per_second"),
+                "transport": completed.get("transport") or started.get("transport"),
+                "concentrated_target": completed.get("concentrated_target") or started.get("concentrated_target"),
+                "host_distribution": completed.get("host_distribution", {}),
+                "path_distribution": completed.get("path_distribution", {}),
+                "method_distribution": completed.get("method_distribution", {}),
+                "request_dump_sample_count": dump_summary.get("sample_count", 0),
+                "request_dump_summary": dump_summary,
             })
         elif sid == "ssh_failure":
             scenario_summary.update({

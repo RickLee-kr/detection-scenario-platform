@@ -62,6 +62,16 @@ def build_http_followup_report_section(
     if sample_urls:
         lines.append(f"- **Sample URLs:** {', '.join(sample_urls[:5])}")
 
+    dump_summary = summary.get("request_dump_summary") or {}
+    if dump_summary:
+        lines.append(f"- **Request dump samples:** {dump_summary.get('sample_count', 0)}")
+        if dump_summary.get("queries_present"):
+            lines.append(f"- **Queries in sample:** {dump_summary['queries_present']}")
+        path_dist = dump_summary.get("path_distribution") or {}
+        if path_dist:
+            top_paths = list(path_dist.keys())[:5]
+            lines.append(f"- **Top paths:** {', '.join(top_paths)}")
+
     lines.extend(
         [
             "",

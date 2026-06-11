@@ -125,6 +125,7 @@ def select_http_followup_endpoints(
         HTTP_PLAIN_PORTS,
     )
     if http_eps:
+        # Bash concentrated URL scan: single best plain-HTTP endpoint (port 80 first).
         selected = http_eps[:max_hosts]
         return (
             [HttpFollowupEndpoint(host=h, port=p, scheme="http") for h, p in selected],

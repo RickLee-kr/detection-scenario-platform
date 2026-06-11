@@ -61,7 +61,8 @@ def test_build_operational_scenario_params_caps_hosts_for_normal() -> None:
         ["http_followup", "dns_tunnel"],
         target_net="10.10.10.0/24",
     )
-    assert params["http_followup"]["max_hosts"] == 2
+    assert params["http_followup"]["max_hosts"] == 1
+    assert params["http_followup"]["max_total"] == 300
     assert params["dns_tunnel"]["traffic_profile"] == "normal"
 
 
@@ -71,7 +72,7 @@ def test_build_operational_scenario_params_uses_all_hosts_for_high() -> None:
         ["http_followup"],
         target_net="192.168.55.0/30",
     )
-    assert params["http_followup"]["max_hosts"] == 2
+    assert params["http_followup"]["max_hosts"] == 1
     assert params["http_followup"]["traffic_profile"] == "high"
 
 
@@ -92,4 +93,4 @@ def test_build_operational_scenario_params_max_hosts_override_caps_high() -> Non
         target_net="10.10.10.0/24",
         max_hosts=3,
     )
-    assert params["http_followup"]["max_hosts"] == 3
+    assert params["http_followup"]["max_hosts"] == 1

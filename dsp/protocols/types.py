@@ -35,6 +35,7 @@ class HttpRequest:
     port: int = 443
     path: str = "/"
     headers: dict[str, str] | None = None
+    body: str | bytes | None = None
 
 
 @dataclass

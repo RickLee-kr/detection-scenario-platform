@@ -401,6 +401,29 @@ class RunManager:
             encoding="utf-8",
         )
 
+        http_completed = next(
+            (
+                e
+                for e in reversed(store.list_events(run_id))
+                if getattr(e, "event", None) == "http_followup_completed"
+            ),
+            None,
+        )
+        if http_completed is not None:
+            dump = (http_completed.evidence or {}).get("request_dump")
+            if dump:
+                (run_dir / "http_request_dump.json").write_text(
+                    json.dumps(
+                        {
+                            "sample_count": len(dump),
+                            "summary": (http_completed.evidence or {}).get("request_dump_summary", {}),
+                            "samples": dump,
+                        },
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
+
         store.close_run()
         self._write_run_json(run_dir / "run.json", run)
 

@@ -7,13 +7,14 @@ from urllib.parse import quote
 
 from dsp.protocols.base import HttpProtocolError
 from dsp.protocols.http.urls import (
-    MAX_HOSTS_DEFAULT,
-    MAX_REQUESTS_PER_HOST_DEFAULT,
-    MAX_REQUESTS_TOTAL_DEFAULT,
     PORT_PRIORITY,
     build_url,
     select_port_for_host,
 )
+
+SQLI_MAX_HOSTS_DEFAULT = 2
+SQLI_MAX_REQUESTS_PER_HOST_DEFAULT = 10
+SQLI_MAX_REQUESTS_TOTAL_DEFAULT = 20
 
 SQLI_PATHS: tuple[str, ...] = (
     "/login",
@@ -61,9 +62,9 @@ def build_sqli_url(host: str, port: int, path: str, query: str) -> str:
 def plan_sqli_requests(
     hosts: list[str],
     *,
-    max_hosts: int = MAX_HOSTS_DEFAULT,
-    max_per_host: int = MAX_REQUESTS_PER_HOST_DEFAULT,
-    max_total: int = MAX_REQUESTS_TOTAL_DEFAULT,
+    max_hosts: int = SQLI_MAX_HOSTS_DEFAULT,
+    max_per_host: int = SQLI_MAX_REQUESTS_PER_HOST_DEFAULT,
+    max_total: int = SQLI_MAX_REQUESTS_TOTAL_DEFAULT,
     port_priority: tuple[int, ...] = PORT_PRIORITY,
     paths: tuple[str, ...] = SQLI_PATHS,
     payloads: tuple[str, ...] = SQLI_PAYLOADS,
