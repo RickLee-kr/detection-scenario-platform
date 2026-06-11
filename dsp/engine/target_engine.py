@@ -54,6 +54,7 @@ def resolve_targets(
         raise ValueError(f"target_net has no usable hosts: {net}")
 
     service_hosts: dict[str, list[str]] = {}
+    service_endpoints: dict[str, list[tuple[str, int]]] = {}
     discovery_enabled = False
     discovery_meta: dict[str, object] = {}
 
@@ -62,12 +63,14 @@ def resolve_targets(
 
         result = discover_services(net, max_hosts=DISCOVERY_MAX_HOSTS)
         service_hosts = result.service_hosts
+        service_endpoints = result.service_endpoints
         discovery_enabled = True
         discovery_meta = {
             "probed_hosts": result.probed_hosts,
             "alive_hosts": result.alive_hosts,
             "open_endpoints": result.open_endpoints,
             "service_hosts": service_hosts,
+            "service_endpoints": service_endpoints,
         }
         if result.alive_hosts:
             hosts = result.alive_hosts
@@ -77,6 +80,7 @@ def resolve_targets(
         hosts=hosts,
         capabilities=caps,
         service_hosts=service_hosts,
+        service_endpoints=service_endpoints,
         discovery_enabled=discovery_enabled,
         discovery_meta=discovery_meta,
     )

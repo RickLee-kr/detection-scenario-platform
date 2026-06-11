@@ -68,3 +68,27 @@ def test_send_request_http_error_is_response():
 
     assert result.outcome == "response"
     assert result.status_code == 404
+
+
+def test_send_request_http_does_not_pass_ssl_context():
+    plan = PlannedHttpRequest(host="10.10.10.20", port=80, path="/")
+    url = plan.url
+
+    mock_resp = MagicMock()
+    mock_resp.__enter__.return_value = mock_resp
+    mock_resp.__exit__.return_value = False
+    mock_resp.status = 302
+    mock_resp.getcode.return_value = 302
+    mock_resp.reason = "Found"
+    mock_resp.read.return_value = b""
+
+    with patch("urllib.request.build_opener") as build_opener:
+        opener = MagicMock()
+        opener.open.return_value = mock_resp
+        build_opener.return_value = opener
+        result = send_request(url, timeout=1.0)
+
+    assert result.outcome == "response"
+    assert result.status_code == 302
+    _, kwargs = opener.open.call_args
+    assert "context" not in kwargs

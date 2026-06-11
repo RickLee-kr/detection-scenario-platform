@@ -60,7 +60,7 @@ def test_http_followup_dry_run_e2e(tmp_runs_dir):
     report = (run_dir / "report.md").read_text()
     assert "## HTTP Follow-up Details" in report
     assert "http_request_sent_count" in report
-    assert "/login" in report or "https://" in report
+    assert "/login" in report or "http://" in report
 
 
 def test_http_followup_live_e2e(tmp_runs_dir, mock_http_urlopen):

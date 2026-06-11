@@ -54,18 +54,25 @@ def probe_tcp_port(host: str, port: int, *, timeout: float = DEFAULT_PROBE_TIMEO
         return False
 
 
+HttpEndpoint = tuple[str, int]
+
+
 @dataclass
 class DiscoveryResult:
     """Service discovery output aligned with bash remote_hosts/*.txt files."""
 
     target_net: str
     service_hosts: dict[str, list[str]] = field(default_factory=dict)
+    service_endpoints: dict[str, list[HttpEndpoint]] = field(default_factory=dict)
     alive_hosts: list[str] = field(default_factory=list)
     probed_hosts: int = 0
     open_endpoints: int = 0
 
     def hosts_for(self, capability: str) -> list[str]:
         return list(self.service_hosts.get(capability, []))
+
+    def endpoints_for(self, capability: str) -> list[HttpEndpoint]:
+        return list(self.service_endpoints.get(capability, []))
 
     def merged_http_hosts(self) -> list[str]:
         seen: set[str] = set()
@@ -100,6 +107,13 @@ def discover_services(
         "https_targets": [],
         "smb_hosts": [],
     }
+    service_endpoints: dict[str, list[HttpEndpoint]] = {
+        "ssh_hosts": [],
+        "dns_hosts": [],
+        "http_targets": [],
+        "https_targets": [],
+        "smb_hosts": [],
+    }
     alive: set[str] = set()
     open_count = 0
 
@@ -113,7 +127,12 @@ def discover_services(
                 jobs.append((host, port, cap))
 
     if not jobs:
-        return DiscoveryResult(target_net=net, service_hosts=service_hosts, probed_hosts=0)
+        return DiscoveryResult(
+            target_net=net,
+            service_hosts=service_hosts,
+            service_endpoints=service_endpoints,
+            probed_hosts=0,
+        )
 
     worker_count = max(1, min(workers, len(jobs)))
     with ThreadPoolExecutor(max_workers=worker_count) as pool:
@@ -130,15 +149,21 @@ def discover_services(
                     bucket = service_hosts.setdefault(cap, [])
                     if host not in bucket:
                         bucket.append(host)
+                    ep_bucket = service_endpoints.setdefault(cap, [])
+                    if (host, port) not in ep_bucket:
+                        ep_bucket.append((host, port))
             except OSError:
                 continue
 
     for cap in service_hosts:
         service_hosts[cap].sort(key=lambda h: tuple(int(p) for p in h.split(".")))
+    for cap in service_endpoints:
+        service_endpoints[cap].sort(key=lambda ep: (tuple(int(p) for p in ep[0].split(".")), ep[1]))
 
     return DiscoveryResult(
         target_net=net,
         service_hosts=service_hosts,
+        service_endpoints=service_endpoints,
         alive_hosts=sorted(alive, key=lambda h: tuple(int(p) for p in h.split("."))),
         probed_hosts=len(candidates),
         open_endpoints=open_count,

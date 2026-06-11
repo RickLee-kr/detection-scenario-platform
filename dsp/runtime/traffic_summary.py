@@ -108,6 +108,9 @@ def build_traffic_summary(
                 "connections_open": completed.get("connection_success_count", 0),
                 "connection_failures": completed.get("connection_failure_count", 0),
                 "ports": started.get("ports", []),
+                "duration_sec": completed.get("duration_sec"),
+                "probes_per_second": completed.get("probes_per_second"),
+                "concurrency": started.get("concurrency") or completed.get("concurrency"),
             })
         elif sid == "http_followup":
             scenario_summary.update({
@@ -116,7 +119,15 @@ def build_traffic_summary(
                 "responses_received": completed.get("response_count", 0),
                 "paths_sample": completed.get("paths_used") or started.get("paths_planned"),
                 "user_agent_classes": completed.get("user_agent_classes", {}),
+                "malicious_rare_ua_count": completed.get("malicious_rare_ua_count", 0),
                 "ports_used": completed.get("ports_used", []),
+                "schemes_used": completed.get("schemes_used", []),
+                "scheme_by_port": completed.get("scheme_by_port", {}),
+                "https_fallback": completed.get("https_fallback", started.get("https_fallback", False)),
+                "http_targets": completed.get("http_targets") or started.get("http_targets", []),
+                "https_targets": completed.get("https_targets") or started.get("https_targets", []),
+                "skipped_no_http_service": skipped.get("skipped_no_http_service", False),
+                "duration_sec": completed.get("duration_sec"),
             })
         elif sid == "ssh_failure":
             scenario_summary.update({

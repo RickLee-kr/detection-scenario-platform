@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 
-from dsp.engine.host_selection import select_merged_http_hosts
+from dsp.engine.host_selection import HttpFollowupEndpoint, select_http_followup_endpoints
 from dsp.engine.scenario_engine import RunContext, TargetSet
 from dsp.event_store import Event
 from dsp.protocols.http import (
@@ -26,8 +26,26 @@ from dsp.protocols.http.urls import (
 from dsp.protocols.http.user_agents import classify_user_agent, pick_user_agent
 
 
-def select_followup_hosts(targets: TargetSet, config: dict, *, max_hosts: int = MAX_HOSTS_DEFAULT) -> list[str]:
-    return select_merged_http_hosts(targets, config, max_hosts=max_hosts)
+def select_followup_endpoints(
+    targets: TargetSet,
+    config: dict,
+    *,
+    max_hosts: int = MAX_HOSTS_DEFAULT,
+) -> tuple[list[HttpFollowupEndpoint], str | None]:
+    return select_http_followup_endpoints(targets, config, max_hosts=max_hosts)
+
+
+def select_followup_hosts(
+    targets: TargetSet,
+    config: dict,
+    *,
+    max_hosts: int = MAX_HOSTS_DEFAULT,
+) -> list[str]:
+    """Backward-compatible host list for console target selection."""
+    endpoints, skip_reason = select_followup_endpoints(targets, config, max_hosts=max_hosts)
+    if skip_reason:
+        return []
+    return [ep.host for ep in endpoints]
 
 
 def _attach_user_agents(plans: list[PlannedHttpRequest]) -> list[PlannedHttpRequest]:
@@ -61,7 +79,7 @@ def _emit_skipped(ctx: RunContext, *, hosts: list[str], reason: str, scenario_id
             evidence={
                 "hosts": hosts,
                 "reason": reason,
-                "skipped_no_open_service": True,
+                "skipped_no_http_service": reason == "skipped_no_http_service",
                 "requests_planned": 0,
                 "requests_sent": 0,
             },
@@ -85,20 +103,24 @@ def run(
     mode = "mock" if ctx.dry_run else "live"
     client = HttpClient(mode=mode, timeout=float(params.get("timeout", 10.0)))
 
-    hosts = select_followup_hosts(targets, params, max_hosts=max_hosts)
-    if not hosts:
+    endpoints, skip_reason = select_followup_endpoints(targets, params, max_hosts=max_hosts)
+    if skip_reason:
         _emit_skipped(
             ctx,
             hosts=[],
-            reason="skipped_no_open_service: no http_targets/https_targets from discovery",
+            reason=skip_reason,
             scenario_id=scenario_id,
             source=source,
         )
         return
 
+    endpoint_tuples = [(ep.host, ep.port) for ep in endpoints]
+    hosts = [ep.host for ep in endpoints]
+    https_fallback = all(ep.scheme == "https" for ep in endpoints) and bool(endpoints)
+
     plans = _attach_user_agents(
         plan_followup_requests(
-            hosts,
+            endpoints=endpoint_tuples,
             max_hosts=max_hosts,
             max_per_host=max_per_host,
             max_total=max_total,
@@ -108,6 +130,8 @@ def run(
 
     paths_planned = sorted({p.path for p in plans})
     ports_used = sorted({plan.port for plan in plans})
+    schemes_used = sorted({plan.scheme for plan in plans})
+    scheme_by_port = {plan.port: plan.scheme for plan in plans}
     sample_urls: list[str] = []
     ua_classes: dict[str, int] = {}
     ua_samples: list[str] = []
@@ -124,6 +148,7 @@ def run(
             source=source,
             evidence={
                 "hosts": hosts,
+                "endpoints": [{"host": ep.host, "port": ep.port, "scheme": ep.scheme} for ep in endpoints],
                 "planned_requests": len(plans),
                 "requests_planned": len(plans),
                 "max_total": max_total,
@@ -132,6 +157,9 @@ def run(
                 "include_attack_paths": include_attack_paths,
                 "paths_planned": paths_planned,
                 "mandatory_attack_paths": list(ATTACK_SCAN_PATHS),
+                "https_fallback": https_fallback,
+                "http_targets": targets.hosts_for_capability("http_targets"),
+                "https_targets": targets.hosts_for_capability("https_targets"),
             },
         )
     )
@@ -154,6 +182,7 @@ def run(
             "seq": seq,
             "host": plan.host,
             "port": plan.port,
+            "scheme": plan.scheme,
             "path": plan.path,
             "method": plan.method,
             "user_agent_class": ua_kind,
@@ -201,6 +230,9 @@ def run(
         elif result.outcome == "timeout":
             timeout_count += 1
 
+    malicious_rare_count = sum(
+        count for kind, count in ua_classes.items() if kind != "normal"
+    )
     elapsed = round(time.monotonic() - t0, 3)
     ctx.event_store.append(
         build_http_followup_completed_event(
@@ -211,6 +243,8 @@ def run(
             evidence={
                 "targets": hosts,
                 "ports_used": ports_used,
+                "schemes_used": schemes_used,
+                "scheme_by_port": scheme_by_port,
                 "paths_used": paths_planned,
                 "requests_planned": len(plans),
                 "request_count": sent_count,
@@ -222,6 +256,10 @@ def run(
                 "sample_urls": sample_urls,
                 "user_agent_classes": ua_classes,
                 "user_agent_samples": ua_samples,
+                "malicious_rare_ua_count": malicious_rare_count,
+                "https_fallback": https_fallback,
+                "http_targets": targets.hosts_for_capability("http_targets"),
+                "https_targets": targets.hosts_for_capability("https_targets"),
             },
         )
     )

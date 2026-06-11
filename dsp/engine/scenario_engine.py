@@ -76,11 +76,15 @@ class TargetSet:
     hosts: list[str] = field(default_factory=list)
     capabilities: dict[str, bool] = field(default_factory=dict)
     service_hosts: dict[str, list[str]] = field(default_factory=dict)
+    service_endpoints: dict[str, list[tuple[str, int]]] = field(default_factory=dict)
     discovery_enabled: bool = False
     discovery_meta: dict[str, object] = field(default_factory=dict)
 
     def hosts_for_capability(self, capability: str) -> list[str]:
         return list(self.service_hosts.get(capability, []))
+
+    def endpoints_for_capability(self, capability: str) -> list[tuple[str, int]]:
+        return list(self.service_endpoints.get(capability, []))
 
     def merged_http_hosts(self) -> list[str]:
         seen: set[str] = set()

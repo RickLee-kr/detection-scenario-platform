@@ -49,7 +49,10 @@ def send_request(
 
     try:
         opener = urllib.request.build_opener(_NoRedirectHandler)
-        with opener.open(req, timeout=timeout, context=context) as resp:
+        open_kwargs: dict[str, Any] = {"timeout": timeout}
+        if context is not None:
+            open_kwargs["context"] = context
+        with opener.open(req, **open_kwargs) as resp:
             status_code = getattr(resp, "status", resp.getcode())
             summary = {
                 "status_code": status_code,

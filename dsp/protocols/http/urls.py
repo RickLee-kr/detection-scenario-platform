@@ -6,7 +6,10 @@ from dataclasses import dataclass
 
 from dsp.protocols.base import HttpProtocolError
 
-PORT_PRIORITY = (443, 8443, 80, 8080, 8000)
+# Plain HTTP first for sensor-visible URL/UA anomaly; HTTPS as fallback only
+HTTP_PORT_PRIORITY = (80, 8080, 8000, 8888, 9000, 9090)
+HTTPS_PORT_PRIORITY = (443, 8443)
+PORT_PRIORITY = HTTP_PORT_PRIORITY + HTTPS_PORT_PRIORITY
 FIXED_PATHS = (
     "/",
     "/login",
@@ -37,7 +40,7 @@ ATTACK_SCAN_PATHS = (
 MAX_HOSTS_DEFAULT = 2
 MAX_REQUESTS_PER_HOST_DEFAULT = 10
 MAX_REQUESTS_TOTAL_DEFAULT = 20
-HTTPS_PORTS = frozenset({443, 8443})
+HTTPS_PORTS = frozenset(HTTPS_PORT_PRIORITY)
 
 
 @dataclass(frozen=True)
@@ -51,6 +54,10 @@ class PlannedHttpRequest:
     @property
     def url(self) -> str:
         return build_url(self.host, self.port, self.path)
+
+    @property
+    def scheme(self) -> str:
+        return "https" if self.port in HTTPS_PORTS else "http"
 
 
 def build_url(host: str, port: int, path: str) -> str:
@@ -88,8 +95,9 @@ def _dedupe_paths(*groups: tuple[str, ...]) -> list[str]:
 
 
 def plan_followup_requests(
-    hosts: list[str],
+    hosts: list[str] | None = None,
     *,
+    endpoints: list[tuple[str, int]] | None = None,
     max_hosts: int = MAX_HOSTS_DEFAULT,
     max_per_host: int = MAX_REQUESTS_PER_HOST_DEFAULT,
     max_total: int = MAX_REQUESTS_TOTAL_DEFAULT,
@@ -97,14 +105,24 @@ def plan_followup_requests(
     include_attack_paths: bool = True,
 ) -> list[PlannedHttpRequest]:
     """
-    Plan HTTP follow-up / URL scan requests across hosts.
+    Plan HTTP follow-up / URL scan requests across hosts or explicit endpoints.
 
     When include_attack_paths is True, bash mandatory attack paths are prepended.
+    Paths cycle when max_per_host exceeds unique path count (bash HTTP_SCAN_REPEAT parity).
     """
     if max_hosts < 1 or max_per_host < 1 or max_total < 1:
         raise HttpProtocolError("request caps must be positive")
 
-    selected = [h.strip() for h in hosts if h.strip()][:max_hosts]
+    if endpoints:
+        selected: list[tuple[str, int]] = [(h.strip(), int(p)) for h, p in endpoints if h.strip()][:max_hosts]
+    elif hosts:
+        selected = [
+            (h.strip(), select_port_for_host(i, port_priority))
+            for i, h in enumerate(h for h in hosts if h.strip())
+        ][:max_hosts]
+    else:
+        raise HttpProtocolError("at least one host or endpoint is required")
+
     if not selected:
         raise HttpProtocolError("at least one host is required")
 
@@ -112,14 +130,18 @@ def plan_followup_requests(
         all_paths = _dedupe_paths(ATTACK_SCAN_PATHS, FIXED_PATHS)
     else:
         all_paths = list(FIXED_PATHS)
-    paths = all_paths[:max_per_host]
+    if not all_paths:
+        raise HttpProtocolError("no paths available for follow-up requests")
+
     plans: list[PlannedHttpRequest] = []
 
-    for host_index, host in enumerate(selected):
-        port = select_port_for_host(host_index, port_priority)
-        for path in paths:
-            if len(plans) >= max_total:
-                return plans
+    for host, port in selected:
+        path_idx = 0
+        host_sent = 0
+        while host_sent < max_per_host and len(plans) < max_total:
+            path = all_paths[path_idx % len(all_paths)]
             plans.append(PlannedHttpRequest(host=host, port=port, path=path))
+            host_sent += 1
+            path_idx += 1
 
     return plans
