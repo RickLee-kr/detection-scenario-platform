@@ -64,6 +64,9 @@ def _scenario_completion_extras(scenario_id: str, evidence: dict[str, Any]) -> d
         extras["requests_per_second"] = evidence.get("requests_per_second")
         extras["duration_sec"] = evidence.get("duration_sec")
         extras["concurrency"] = evidence.get("concurrency")
+        extras["selected_http_target_reason"] = evidence.get("selected_http_target_reason")
+        extras["response_code_distribution"] = evidence.get("response_code_distribution")
+        extras["redirect_only_warning"] = evidence.get("redirect_only_warning")
     elif scenario_id == "port_sweep":
         extras["duration_sec"] = evidence.get("duration_sec")
         extras["probes_per_second"] = evidence.get("probes_per_second")

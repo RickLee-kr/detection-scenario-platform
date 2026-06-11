@@ -141,6 +141,7 @@ class OperationalConsole:
         meta = data.get("metadata") or {}
         for key in (
             "target",
+            "selected_http_target_reason",
             "planned_requests",
             "planned_probes",
             "planned_attempts",
@@ -294,9 +295,20 @@ class OperationalConsole:
                 "unique_paths",
                 "unique_user_agents",
                 "malicious_rare_ua_count",
+                "selected_http_target_reason",
             ):
                 if key in extras:
                     self._write(f"  {key}={extras[key]}")
+            if sid == "http_followup":
+                dist = extras.get("response_code_distribution") or {}
+                if dist:
+                    dist_text = ", ".join(f"{code}={count}" for code, count in sorted(dist.items()))
+                    self._write(f"  response_code_distribution={dist_text}")
+                if extras.get("redirect_only_warning"):
+                    self._write(
+                        "  WARN: redirect-only HTTP responses — "
+                        "target may be unsuitable for URL/User-Agent detection parity"
+                    )
             for name, path in artifacts.items():
                 self._write(f"  {name}={path}")
             self._write("")

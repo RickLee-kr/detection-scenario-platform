@@ -138,6 +138,13 @@ def build_traffic_summary(
                 "method_distribution": completed.get("method_distribution", {}),
                 "request_dump_sample_count": dump_summary.get("sample_count", 0),
                 "request_dump_summary": dump_summary,
+                "selected_http_target_reason": completed.get("selected_http_target_reason")
+                or started.get("selected_http_target_reason", ""),
+                "response_code_distribution": completed.get("response_code_distribution", {}),
+                "redirect_only_warning": completed.get("redirect_only_warning", False),
+                "probe_summaries": completed.get("probe_summaries") or started.get("probe_summaries", []),
+                "redirect_only_candidates": completed.get("redirect_only_candidates")
+                or started.get("redirect_only_candidates", []),
             })
         elif sid == "ssh_failure":
             scenario_summary.update({

@@ -111,15 +111,37 @@ def pick_payload_user_agent() -> str:
     return pick_payload_fragment()
 
 
-def pick_burst_user_agent() -> str:
-    """
-    Bash pick_burst_ua for url_scan — normal_ua_allowed=no.
+def is_scanner_user_agent(ua: str) -> bool:
+    return bool(_RE_RARE.search(ua))
 
-    50% rare scanner UA, 50% payload UA (no normal browser UA).
+
+def is_payload_only_user_agent(ua: str) -> bool:
+    if is_scanner_user_agent(ua):
+        return False
+    if any(marker in ua for marker in ("Chrome/120.0.0.0", "Version/17.0 Safari")):
+        return False
+    return bool(
+        _RE_SQLI.search(ua)
+        or _RE_ENC.search(ua)
+        or _RE_CMD.search(ua)
+        or ua in _PAYLOAD_OTHER
+    )
+
+
+def pick_url_scan_user_agent() -> str:
+    """
+    URL scan UA — scanner exact strings only; attack payload belongs in path/query.
+
+    50% pure scanner UA, 50% scanner UA + payload suffix (never payload-only).
     """
     if random.randrange(2) == 0:
         return pick_rare_user_agent()
-    return pick_payload_user_agent()
+    return f"{pick_rare_user_agent()} {pick_payload_fragment()}"
+
+
+def pick_burst_user_agent() -> str:
+    """URL scan burst — scanner UA policy (no payload-only User-Agent)."""
+    return pick_url_scan_user_agent()
 
 
 def pick_user_agent() -> str:
@@ -136,12 +158,14 @@ def classify_user_agent(ua: str) -> str:
     """Bash http_ua_classify_local categories."""
     if any(marker in ua for marker in ("Chrome/120.0.0.0", "Version/17.0 Safari")):
         return "normal"
+    if _RE_RARE.search(ua):
+        if _RE_SQLI.search(ua) or _RE_ENC.search(ua) or _RE_CMD.search(ua):
+            return "rare_with_payload"
+        return "rare"
     if _RE_SQLI.search(ua):
         return "payload_sqli"
     if _RE_ENC.search(ua):
         return "payload_lfi"
     if _RE_CMD.search(ua):
         return "payload_cmd"
-    if _RE_RARE.search(ua):
-        return "rare"
     return "payload_other"

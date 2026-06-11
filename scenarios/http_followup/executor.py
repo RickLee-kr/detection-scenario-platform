@@ -8,7 +8,11 @@ from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, NamedTuple
 
-from dsp.engine.host_selection import HttpFollowupEndpoint, select_http_followup_endpoints
+from dsp.engine.host_selection import (
+    HttpFollowupEndpoint,
+    HttpFollowupSelection,
+    probe_and_select_http_followup_endpoints,
+)
 from dsp.engine.scenario_engine import RunContext, TargetSet
 from dsp.event_store import Event
 from dsp.protocols.http import (
@@ -32,7 +36,6 @@ from dsp.protocols.http.urls import (
 from dsp.protocols.http.user_agents import classify_user_agent, pick_burst_user_agent
 from dsp.protocols.types import HttpRequest, HttpResponseResult
 from dsp.runner.activity_reporter import ActivityReporter
-from dsp.runner.activity_reporter import ActivityReporter
 
 # stellar_poc_followup.sh: inter_sleep=0, ~300 unique URLs in HTTP_SCAN_WINDOW_SECONDS (~40s)
 DEFAULT_CONCURRENCY = 32
@@ -53,8 +56,26 @@ def select_followup_endpoints(
     config: dict,
     *,
     max_hosts: int = MAX_HOSTS_DEFAULT,
-) -> tuple[list[HttpFollowupEndpoint], str | None]:
-    return select_http_followup_endpoints(targets, config, max_hosts=max_hosts)
+    client: HttpClient | None = None,
+) -> HttpFollowupSelection:
+    return probe_and_select_http_followup_endpoints(
+        targets, config, max_hosts=max_hosts, client=client
+    )
+
+
+def _response_code_distribution(counter: Counter[int]) -> dict[str, int]:
+    return {str(code): count for code, count in sorted(counter.items())}
+
+
+def _redirect_only_warning(dist: dict[str, int], total_responses: int) -> bool:
+    if total_responses <= 0:
+        return False
+    redirect = sum(int(dist.get(str(code), 0)) for code in (301, 302, 303, 307, 308))
+    errors = sum(int(dist.get(str(code), 0)) for code in range(400, 600))
+    success = sum(int(dist.get(str(code), 0)) for code in range(200, 300))
+    if redirect == total_responses:
+        return True
+    return redirect > 0 and errors == 0 and success == 0 and redirect >= int(total_responses * 0.9)
 
 
 def select_followup_hosts(
@@ -62,12 +83,13 @@ def select_followup_hosts(
     config: dict,
     *,
     max_hosts: int = MAX_HOSTS_DEFAULT,
+    client: HttpClient | None = None,
 ) -> list[str]:
     """Backward-compatible host list for console target selection."""
-    endpoints, skip_reason = select_followup_endpoints(targets, config, max_hosts=max_hosts)
-    if skip_reason:
+    selection = select_followup_endpoints(targets, config, max_hosts=max_hosts, client=client)
+    if selection.skip_reason:
         return []
-    return [ep.host for ep in endpoints]
+    return [ep.host for ep in selection.endpoints]
 
 
 def _campaign_id(ctx: RunContext) -> str:
@@ -246,21 +268,23 @@ def run(
     campaign = _campaign_id(ctx)
     live_transport = "curl" if (mode == "live" and client._use_curl()) else "urllib"
 
-    endpoints, skip_reason = select_followup_endpoints(targets, params, max_hosts=max_hosts)
-    if skip_reason:
+    selection = select_followup_endpoints(targets, params, max_hosts=max_hosts, client=client)
+    if selection.skip_reason:
         _emit_skipped(
             ctx,
             hosts=[],
-            reason=skip_reason,
+            reason=selection.skip_reason,
             scenario_id=scenario_id,
             source=source,
         )
         return
 
+    endpoints = selection.endpoints
     endpoint_tuples = [(ep.host, ep.port) for ep in endpoints]
     hosts = [ep.host for ep in endpoints]
     https_fallback = all(ep.scheme == "https" for ep in endpoints) and bool(endpoints)
     concentrated_target = f"{endpoints[0].scheme}://{endpoints[0].host}:{endpoints[0].port}" if endpoints else ""
+    status_counter: Counter[int] = Counter()
 
     plans = _attach_burst_user_agents(
         plan_followup_requests(
@@ -295,7 +319,18 @@ def run(
             source=source,
             evidence={
                 "hosts": hosts,
-                "endpoints": [{"host": ep.host, "port": ep.port, "scheme": ep.scheme} for ep in endpoints],
+                "endpoints": [
+                    {
+                        "host": ep.host,
+                        "port": ep.port,
+                        "scheme": ep.scheme,
+                        "selection_reason": ep.selection_reason,
+                    }
+                    for ep in endpoints
+                ],
+                "selected_http_target_reason": selection.selected_http_target_reason,
+                "probe_summaries": selection.probe_summaries,
+                "redirect_only_candidates": selection.redirect_only_candidates,
                 "planned_requests": len(plans),
                 "requests_planned": len(plans),
                 "max_total": max_total,
@@ -312,7 +347,7 @@ def run(
                 "https_fallback": https_fallback,
                 "http_targets": targets.hosts_for_capability("http_targets"),
                 "https_targets": targets.hosts_for_capability("https_targets"),
-                "ua_policy": "url_scan_burst_no_normal",
+                "ua_policy": "url_scan_scanner_ua_only",
                 "campaign_id": campaign,
             },
         )
@@ -407,6 +442,8 @@ def run(
             )
             if outcome.result.outcome == "response":
                 response_count += 1
+                if outcome.result.status_code is not None:
+                    status_counter[int(outcome.result.status_code)] += 1
             elif outcome.result.outcome == "timeout":
                 timeout_count += 1
 
@@ -443,6 +480,8 @@ def run(
     )
     elapsed = round(time.monotonic() - t0, 3)
     requests_per_second = round(sent_count / elapsed, 2) if elapsed > 0 else 0.0
+    response_code_distribution = _response_code_distribution(status_counter)
+    redirect_only_warning = _redirect_only_warning(response_code_distribution, response_count)
     ctx.event_store.append(
         build_http_followup_completed_event(
             run_id=ctx.run_id,
@@ -477,8 +516,13 @@ def run(
                 "host_distribution": dict(host_counts),
                 "path_distribution": dict(path_counts.most_common(15)),
                 "method_distribution": dict(method_counts),
-                "ua_policy": "url_scan_burst_no_normal",
+                "ua_policy": "url_scan_scanner_ua_only",
                 "campaign_id": campaign,
+                "selected_http_target_reason": selection.selected_http_target_reason,
+                "response_code_distribution": response_code_distribution,
+                "redirect_only_warning": redirect_only_warning,
+                "probe_summaries": selection.probe_summaries,
+                "redirect_only_candidates": selection.redirect_only_candidates,
             },
         )
     )

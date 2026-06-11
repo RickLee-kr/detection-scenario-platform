@@ -108,15 +108,20 @@ def scenario_start_metadata(
         meta["planned_probes"] = min(len(hosts), max_hosts) * max_ports
         meta["concurrency"] = int(params.get("concurrency", 32))
     elif scenario_id == "http_followup":
-        from dsp.engine.host_selection import select_http_followup_endpoints
+        from dsp.engine.host_selection import probe_and_select_http_followup_endpoints
+        from dsp.protocols.http import HttpClient
         from dsp.protocols.http.curl_transport import curl_available
 
         max_hosts = int(params.get("max_hosts", 1))
         max_total = int(params.get("max_total", 300))
-        endpoints, _skip = select_http_followup_endpoints(targets, params, max_hosts=max_hosts)
-        if endpoints:
-            ep = endpoints[0]
+        client = HttpClient(mode="live", timeout=float(params.get("timeout", 2.0)), transport="auto")
+        selection = probe_and_select_http_followup_endpoints(
+            targets, params, max_hosts=max_hosts, client=client
+        )
+        if selection.endpoints:
+            ep = selection.endpoints[0]
             meta["target"] = f"{ep.scheme}://{ep.host}:{ep.port}"
+            meta["selected_http_target_reason"] = selection.selected_http_target_reason
         meta["planned_requests"] = max_total
         meta["transport"] = "curl" if curl_available() else "urllib"
         meta["evidence"] = "http_followup_requests.jsonl"
