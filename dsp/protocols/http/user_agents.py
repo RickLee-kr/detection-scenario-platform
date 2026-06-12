@@ -144,6 +144,52 @@ def pick_burst_user_agent() -> str:
     return pick_url_scan_user_agent()
 
 
+def is_normal_user_agent(ua: str) -> bool:
+    return any(marker in ua for marker in ("Chrome/120.0.0.0", "Version/17.0 Safari"))
+
+
+def is_abnormal_user_agent(ua: str) -> bool:
+    return not is_normal_user_agent(ua)
+
+
+def attach_followup_user_agents(
+    plans: list,
+    *,
+    campaign: str,
+    abnormal_ratio: float = 0.25,
+    header_builder,
+) -> tuple[list, dict[str, int | float]]:
+    """Assign mixed normal/scanner UA while keeping attack paths on every request."""
+    from dsp.protocols.http.urls import PlannedHttpRequest
+
+    total = len(plans)
+    ratio = max(0.0, min(1.0, abnormal_ratio))
+    abnormal_count = max(0, min(total, round(total * ratio)))
+    abnormal_indices = set(random.sample(range(total), abnormal_count)) if abnormal_count else set()
+
+    enriched: list[PlannedHttpRequest] = []
+    for idx, plan in enumerate(plans):
+        ua = pick_url_scan_user_agent() if idx in abnormal_indices else pick_normal_user_agent()
+        body = f"probe={campaign}" if plan.method == "POST" else plan.body
+        enriched.append(
+            PlannedHttpRequest(
+                host=plan.host,
+                port=plan.port,
+                path=plan.path,
+                query=plan.query,
+                method=plan.method,
+                body=body,
+                headers=header_builder(plan, campaign=campaign, user_agent=ua),
+            )
+        )
+
+    return enriched, {
+        "abnormal_user_agents_planned": abnormal_count,
+        "normal_user_agents_planned": total - abnormal_count,
+        "abnormal_ua_ratio": ratio,
+    }
+
+
 def pick_user_agent() -> str:
     """Bash http_ua_pick_local — 10% normal, 40% rare, 50% payload."""
     roll = random.randrange(100)

@@ -32,8 +32,14 @@ from dsp.protocols.http.urls import (
     MAX_REQUESTS_TOTAL_DEFAULT,
     REQUEST_DUMP_SAMPLE_SIZE,
     PlannedHttpRequest,
+    compute_requests_per_target,
 )
-from dsp.protocols.http.user_agents import classify_user_agent, pick_burst_user_agent
+from dsp.protocols.http.user_agents import (
+    attach_followup_user_agents,
+    classify_user_agent,
+    is_abnormal_user_agent,
+    is_payload_only_user_agent,
+)
 from dsp.protocols.types import HttpRequest, HttpResponseResult
 from dsp.runner.activity_reporter import ActivityReporter
 
@@ -115,27 +121,16 @@ def _bash_parity_headers(
     return headers
 
 
-def _attach_burst_user_agents(
-    plans: list[PlannedHttpRequest],
-    *,
-    campaign: str,
-) -> list[PlannedHttpRequest]:
-    enriched: list[PlannedHttpRequest] = []
+def _target_key(host: str, port: int) -> str:
+    return f"{host}:{port}"
+
+
+def _requests_per_target(plans: list[PlannedHttpRequest]) -> dict[str, int]:
+    counts: dict[str, int] = {}
     for plan in plans:
-        ua = pick_burst_user_agent()
-        body = f"probe={campaign}" if plan.method == "POST" else plan.body
-        enriched.append(
-            PlannedHttpRequest(
-                host=plan.host,
-                port=plan.port,
-                path=plan.path,
-                query=plan.query,
-                method=plan.method,
-                body=body,
-                headers=_bash_parity_headers(plan, campaign=campaign, user_agent=ua),
-            )
-        )
-    return enriched
+        key = _target_key(plan.host, plan.port)
+        counts[key] = counts.get(key, 0) + 1
+    return counts
 
 
 def _evidence_dump_record(outcome: _RequestOutcome) -> dict[str, Any]:
@@ -255,6 +250,8 @@ def run(
     max_hosts = int(params.get("max_hosts", MAX_HOSTS_DEFAULT))
     max_per_host = int(params.get("max_per_host", MAX_REQUESTS_PER_HOST_DEFAULT))
     max_total = int(params.get("max_total", MAX_REQUESTS_TOTAL_DEFAULT))
+    min_requests_per_target = int(params.get("min_requests_per_target", 100))
+    abnormal_ua_ratio = float(params.get("abnormal_ua_ratio", 0.25))
     include_attack_paths = bool(params.get("include_attack_paths", True))
     concurrency = max(1, int(params.get("concurrency", DEFAULT_CONCURRENCY)))
     transport = str(params.get("transport", "auto"))
@@ -286,16 +283,28 @@ def run(
     concentrated_target = f"{endpoints[0].scheme}://{endpoints[0].host}:{endpoints[0].port}" if endpoints else ""
     status_counter: Counter[int] = Counter()
 
-    plans = _attach_burst_user_agents(
-        plan_followup_requests(
-            endpoints=endpoint_tuples,
-            max_hosts=max_hosts,
-            max_per_host=max_per_host,
-            max_total=max_total,
-            include_attack_paths=include_attack_paths,
-        ),
-        campaign=campaign,
+    per_target_budget = compute_requests_per_target(
+        len(endpoint_tuples),
+        max_total,
+        min_per_target=min_requests_per_target,
     )
+    max_per_host = min(max_per_host, per_target_budget)
+
+    raw_plans = plan_followup_requests(
+        endpoints=endpoint_tuples,
+        max_hosts=max_hosts,
+        max_per_host=max_per_host,
+        max_total=max_total,
+        include_attack_paths=include_attack_paths,
+    )
+    plans, ua_plan_stats = attach_followup_user_agents(
+        raw_plans,
+        campaign=campaign,
+        abnormal_ratio=abnormal_ua_ratio,
+        header_builder=_bash_parity_headers,
+    )
+    requests_per_target = _requests_per_target(plans)
+    selected_targets = sorted(requests_per_target)
 
     paths_planned = sorted({p.full_path for p in plans})
     ports_used = sorted({plan.port for plan in plans})
@@ -347,8 +356,14 @@ def run(
                 "https_fallback": https_fallback,
                 "http_targets": targets.hosts_for_capability("http_targets"),
                 "https_targets": targets.hosts_for_capability("https_targets"),
-                "ua_policy": "url_scan_scanner_ua_only",
+                "ua_policy": "url_scan_mixed_ua",
                 "campaign_id": campaign,
+                "selected_targets": selected_targets,
+                "requests_per_target": requests_per_target,
+                "abnormal_ua_ratio": abnormal_ua_ratio,
+                "expected_url_scan_distribution": dict(requests_per_target),
+                "abnormal_user_agents_planned": ua_plan_stats["abnormal_user_agents_planned"],
+                "normal_user_agents_planned": ua_plan_stats["normal_user_agents_planned"],
             },
         )
     )
@@ -468,9 +483,12 @@ def run(
     request_evidence = [_evidence_dump_record(o) for o in outcomes]
     request_dump = [_request_dump_record(o) for o in outcomes[:REQUEST_DUMP_SAMPLE_SIZE]]
 
-    malicious_rare_count = sum(
-        count for kind, count in ua_classes.items() if kind != "normal"
-    )
+    abnormal_user_agents = sum(1 for o in outcomes if is_abnormal_user_agent(o.ua))
+    normal_user_agents = sent_count - abnormal_user_agents
+    payload_only_ua = sum(1 for o in outcomes if is_payload_only_user_agent(o.ua))
+    target_distribution = _requests_per_target([o.plan for o in outcomes])
+    abnormal_user_agent_ratio = round(abnormal_user_agents / sent_count, 4) if sent_count else 0.0
+    malicious_rare_count = abnormal_user_agents
     dump_summary = _build_dump_summary(
         request_dump,
         ua_classes=ua_classes,
@@ -507,6 +525,16 @@ def run(
                 "transport": live_transport,
                 "user_agent_classes": ua_classes,
                 "malicious_rare_ua_count": malicious_rare_count,
+                "abnormal_user_agents": abnormal_user_agents,
+                "normal_user_agents": normal_user_agents,
+                "abnormal_user_agent_ratio": abnormal_user_agent_ratio,
+                "payload_only_ua": payload_only_ua,
+                "target_count": len(target_distribution),
+                "target_distribution": target_distribution,
+                "selected_targets": selected_targets,
+                "requests_per_target": requests_per_target,
+                "abnormal_ua_ratio": abnormal_ua_ratio,
+                "expected_url_scan_distribution": dict(requests_per_target),
                 "https_fallback": https_fallback,
                 "http_targets": targets.hosts_for_capability("http_targets"),
                 "https_targets": targets.hosts_for_capability("https_targets"),
@@ -516,7 +544,7 @@ def run(
                 "host_distribution": dict(host_counts),
                 "path_distribution": dict(path_counts.most_common(15)),
                 "method_distribution": dict(method_counts),
-                "ua_policy": "url_scan_scanner_ua_only",
+                "ua_policy": "url_scan_mixed_ua",
                 "campaign_id": campaign,
                 "selected_http_target_reason": selection.selected_http_target_reason,
                 "response_code_distribution": response_code_distribution,

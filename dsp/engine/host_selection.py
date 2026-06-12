@@ -182,21 +182,37 @@ def probe_and_select_http_followup_endpoints(
     selected: list[HttpFollowupEndpoint] = []
     probe_summaries: list[dict[str, int | str]] = []
     redirect_labels: list[str] = []
+    selected_keys: set[tuple[str, int]] = set()
+    selected_hosts: set[str] = set()
 
     for stats, _score in ordered:
         probe_summaries.append(stats.to_summary())
         label = f"{stats.scheme}://{stats.host}:{stats.port}"
         if stats.is_redirect_only:
             redirect_labels.append(label)
-        if len(selected) < max_hosts:
-            selected.append(
-                HttpFollowupEndpoint(
-                    host=stats.host,
-                    port=stats.port,
-                    scheme=stats.scheme,
-                    selection_reason=selection_reason_for(stats),
-                )
+
+    def _append_endpoint(stats: HttpEndpointProbeStats) -> None:
+        key = (stats.host, stats.port)
+        if key in selected_keys or len(selected) >= max_hosts:
+            return
+        selected_keys.add(key)
+        selected_hosts.add(stats.host)
+        selected.append(
+            HttpFollowupEndpoint(
+                host=stats.host,
+                port=stats.port,
+                scheme=stats.scheme,
+                selection_reason=selection_reason_for(stats),
             )
+        )
+
+    for stats, _score in ordered:
+        if stats.host in selected_hosts:
+            continue
+        _append_endpoint(stats)
+
+    for stats, _score in ordered:
+        _append_endpoint(stats)
 
     primary_reason = selected[0].selection_reason if selected else ""
     return HttpFollowupSelection(
@@ -207,6 +223,32 @@ def probe_and_select_http_followup_endpoints(
     )
 
 
+def _pick_diverse_endpoints(
+    endpoints: list[tuple[str, int, str]],
+    *,
+    max_hosts: int,
+) -> list[tuple[str, int, str]]:
+    picked: list[tuple[str, int, str]] = []
+    seen_keys: set[tuple[str, int]] = set()
+    seen_hosts: set[str] = set()
+
+    def _append(ep: tuple[str, int, str]) -> None:
+        host, port, _scheme = ep
+        key = (host, port)
+        if key in seen_keys or len(picked) >= max_hosts:
+            return
+        seen_keys.add(key)
+        seen_hosts.add(host)
+        picked.append(ep)
+
+    for ep in endpoints:
+        if ep[0] not in seen_hosts:
+            _append(ep)
+    for ep in endpoints:
+        _append(ep)
+    return picked
+
+
 def _select_without_probe(
     candidates: list[tuple[str, int, str]],
     *,
@@ -214,7 +256,7 @@ def _select_without_probe(
 ) -> HttpFollowupSelection:
     http_eps = [(h, p, s) for h, p, s in candidates if s == "http"]
     if http_eps:
-        picked = http_eps[:max_hosts]
+        picked = _pick_diverse_endpoints(http_eps, max_hosts=max_hosts)
         return HttpFollowupSelection(
             endpoints=[
                 HttpFollowupEndpoint(host=h, port=p, scheme=s, selection_reason="not_redirect_only")
@@ -225,7 +267,7 @@ def _select_without_probe(
 
     https_eps = [(h, p, s) for h, p, s in candidates if s == "https"]
     if https_eps:
-        picked = https_eps[:max_hosts]
+        picked = _pick_diverse_endpoints(https_eps, max_hosts=max_hosts)
         return HttpFollowupSelection(
             endpoints=[
                 HttpFollowupEndpoint(host=h, port=p, scheme=s, selection_reason="not_redirect_only")

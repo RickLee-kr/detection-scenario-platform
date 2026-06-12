@@ -109,11 +109,15 @@ def scenario_start_metadata(
         meta["concurrency"] = int(params.get("concurrency", 32))
     elif scenario_id == "http_followup":
         from dsp.engine.host_selection import probe_and_select_http_followup_endpoints
-        from dsp.protocols.http import HttpClient
+        from dsp.protocols.http import HttpClient, plan_followup_requests
         from dsp.protocols.http.curl_transport import curl_available
+        from dsp.protocols.http.urls import compute_requests_per_target
 
-        max_hosts = int(params.get("max_hosts", 1))
+        max_hosts = int(params.get("max_hosts", 3))
+        max_per_host = int(params.get("max_per_host", 150))
         max_total = int(params.get("max_total", 300))
+        min_requests_per_target = int(params.get("min_requests_per_target", 100))
+        abnormal_ua_ratio = float(params.get("abnormal_ua_ratio", 0.25))
         client = HttpClient(mode="live", timeout=float(params.get("timeout", 2.0)), transport="auto")
         selection = probe_and_select_http_followup_endpoints(
             targets, params, max_hosts=max_hosts, client=client
@@ -122,6 +126,28 @@ def scenario_start_metadata(
             ep = selection.endpoints[0]
             meta["target"] = f"{ep.scheme}://{ep.host}:{ep.port}"
             meta["selected_http_target_reason"] = selection.selected_http_target_reason
+            endpoint_tuples = [(e.host, e.port) for e in selection.endpoints]
+            per_target = compute_requests_per_target(
+                len(endpoint_tuples),
+                max_total,
+                min_per_target=min_requests_per_target,
+            )
+            planned = plan_followup_requests(
+                endpoints=endpoint_tuples,
+                max_hosts=max_hosts,
+                max_per_host=min(max_per_host, per_target),
+                max_total=max_total,
+                include_attack_paths=bool(params.get("include_attack_paths", True)),
+            )
+            requests_per_target: dict[str, int] = {}
+            for plan in planned:
+                key = f"{plan.host}:{plan.port}"
+                requests_per_target[key] = requests_per_target.get(key, 0) + 1
+            meta["selected_targets"] = sorted(requests_per_target)
+            meta["requests_per_target"] = requests_per_target
+            meta["abnormal_ua_ratio"] = f"{abnormal_ua_ratio:.0%}"
+            meta["expected_url_scan_distribution"] = requests_per_target
+            meta["targets"] = len(requests_per_target)
         meta["planned_requests"] = max_total
         meta["transport"] = "curl" if curl_available() else "urllib"
         meta["evidence"] = "http_followup_requests.jsonl"

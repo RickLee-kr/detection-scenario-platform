@@ -145,6 +145,20 @@ def build_traffic_summary(
                 "probe_summaries": completed.get("probe_summaries") or started.get("probe_summaries", []),
                 "redirect_only_candidates": completed.get("redirect_only_candidates")
                 or started.get("redirect_only_candidates", []),
+                "target_count": completed.get("target_count", len(completed.get("target_distribution", {}))),
+                "target_distribution": completed.get("target_distribution", {}),
+                "selected_targets": completed.get("selected_targets")
+                or started.get("selected_targets", []),
+                "requests_per_target": completed.get("requests_per_target")
+                or started.get("requests_per_target", {}),
+                "abnormal_user_agents": completed.get("abnormal_user_agents", 0),
+                "normal_user_agents": completed.get("normal_user_agents", 0),
+                "abnormal_user_agent_ratio": completed.get("abnormal_user_agent_ratio", 0.0),
+                "payload_only_ua": completed.get("payload_only_ua", 0),
+                "abnormal_ua_ratio": completed.get("abnormal_ua_ratio")
+                or started.get("abnormal_ua_ratio", 0.0),
+                "expected_url_scan_distribution": completed.get("expected_url_scan_distribution")
+                or started.get("expected_url_scan_distribution", {}),
             })
         elif sid == "ssh_failure":
             scenario_summary.update({

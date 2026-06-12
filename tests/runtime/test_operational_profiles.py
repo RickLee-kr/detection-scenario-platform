@@ -61,8 +61,9 @@ def test_build_operational_scenario_params_caps_hosts_for_normal() -> None:
         ["http_followup", "dns_tunnel"],
         target_net="10.10.10.0/24",
     )
-    assert params["http_followup"]["max_hosts"] == 1
+    assert params["http_followup"]["max_hosts"] == 3
     assert params["http_followup"]["max_total"] == 300
+    assert params["http_followup"]["abnormal_ua_ratio"] == 0.25
     assert params["dns_tunnel"]["traffic_profile"] == "normal"
 
 

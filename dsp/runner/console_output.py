@@ -152,9 +152,22 @@ class OperationalConsole:
             "concurrency",
             "targets",
             "ports",
+            "abnormal_ua_ratio",
         ):
             if key in meta and meta[key] is not None:
                 self._write(f"{key}={meta[key]}")
+        if scenario_id == "http_followup":
+            requests_per_target = meta.get("requests_per_target") or {}
+            if requests_per_target:
+                self._write("HTTP:")
+                for target, count in sorted(requests_per_target.items()):
+                    self._write(f"  {target} requests={count}")
+            if meta.get("selected_targets"):
+                self._write(f"selected_targets={meta['selected_targets']}")
+            if meta.get("expected_url_scan_distribution"):
+                self._write(
+                    f"expected_url_scan_distribution={meta['expected_url_scan_distribution']}"
+                )
         self._write("")
 
     def _emit_activity(self, data: dict[str, Any]) -> None:
@@ -295,6 +308,11 @@ class OperationalConsole:
                 "unique_paths",
                 "unique_user_agents",
                 "malicious_rare_ua_count",
+                "abnormal_user_agents",
+                "normal_user_agents",
+                "abnormal_user_agent_ratio",
+                "payload_only_ua",
+                "target_count",
                 "selected_http_target_reason",
             ):
                 if key in extras:
@@ -304,6 +322,9 @@ class OperationalConsole:
                 if dist:
                     dist_text = ", ".join(f"{code}={count}" for code, count in sorted(dist.items()))
                     self._write(f"  response_code_distribution={dist_text}")
+                target_dist = extras.get("target_distribution") or {}
+                if target_dist:
+                    self._write(f"  target_distribution={target_dist}")
                 if extras.get("redirect_only_warning"):
                     self._write(
                         "  WARN: redirect-only HTTP responses — "

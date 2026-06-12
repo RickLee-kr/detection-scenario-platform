@@ -26,7 +26,7 @@ def test_resolve_run_plan_profile_normal_selects_coverage(tmp_path: Path) -> Non
     assert "port_sweep" in scenario_ids
     assert "kerberos_failure" in scenario_ids
     assert params is not None
-    assert params["http_followup"]["max_hosts"] == 1
+    assert params["http_followup"]["max_hosts"] == 3
     assert params["http_followup"]["max_total"] == 300
 
 

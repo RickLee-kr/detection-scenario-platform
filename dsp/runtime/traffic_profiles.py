@@ -60,12 +60,14 @@ _SCENARIO_PROFILE_PARAMS: dict[str, dict[str, dict[str, Any]]] = {
             "include_attack_paths": True,
         },
         "normal": {
-            "max_hosts": 1,
-            "max_per_host": 300,
+            "max_hosts": 3,
+            "max_per_host": 150,
             "max_total": 300,
             "timeout": 2.0,
             "concurrency": 32,
             "include_attack_paths": True,
+            "abnormal_ua_ratio": 0.25,
+            "min_requests_per_target": 100,
         },
         "high": {
             "max_hosts": 1,

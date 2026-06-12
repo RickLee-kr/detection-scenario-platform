@@ -171,6 +171,21 @@ class _AttackUrlPlanner:
         return base, query
 
 
+def compute_requests_per_target(
+    num_targets: int,
+    max_total: int,
+    *,
+    min_per_target: int = 100,
+) -> int:
+    """Even per-target request budget (minimum when total volume allows)."""
+    if num_targets < 1 or max_total < 1:
+        raise HttpProtocolError("target count and max_total must be positive")
+    per_target = max_total // num_targets
+    if per_target < min_per_target and num_targets * min_per_target <= max_total:
+        per_target = min_per_target
+    return per_target
+
+
 def plan_followup_requests(
     hosts: list[str] | None = None,
     *,
