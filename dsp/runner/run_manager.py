@@ -85,7 +85,22 @@ def _scenario_artifact_paths(scenario_id: str, run_dir: Path) -> dict[str, str]:
     if scenario_id == "http_followup":
         artifacts["evidence_file"] = str(run_dir / "http_followup_requests.jsonl")
         artifacts["sample_dump"] = str(run_dir / "http_request_dump.json")
+    elif scenario_id == "sql_injection":
+        artifacts["evidence_file"] = str(run_dir / "sql_injection_requests.jsonl")
     return artifacts
+
+
+def _write_sql_injection_artifacts(run_dir: Path, evidence: dict[str, Any]) -> None:
+    request_evidence = evidence.get("sql_injection_request_evidence")
+    if request_evidence:
+        evidence_lines = "".join(
+            json.dumps(record, ensure_ascii=False) + "\n"
+            for record in request_evidence
+        )
+        (run_dir / "sql_injection_requests.jsonl").write_text(
+            evidence_lines,
+            encoding="utf-8",
+        )
 
 
 def _write_http_followup_artifacts(run_dir: Path, evidence: dict[str, Any]) -> None:
@@ -401,6 +416,8 @@ class RunManager:
                     completed_evidence = _latest_completed_evidence(store, run_id, sid)
                     if sid == "http_followup" and completed_evidence:
                         _write_http_followup_artifacts(run_dir, completed_evidence)
+                    if sid == "sql_injection" and completed_evidence:
+                        _write_sql_injection_artifacts(run_dir, completed_evidence)
                     emitter.emit(
                         "scenario_completed",
                         {
@@ -489,6 +506,17 @@ class RunManager:
         )
         if http_completed is not None:
             _write_http_followup_artifacts(run_dir, http_completed.evidence or {})
+
+        sql_completed = next(
+            (
+                e
+                for e in reversed(store.list_events(run_id))
+                if getattr(e, "event", None) == "sql_injection_completed"
+            ),
+            None,
+        )
+        if sql_completed is not None:
+            _write_sql_injection_artifacts(run_dir, sql_completed.evidence or {})
 
         store.close_run()
         self._write_run_json(run_dir / "run.json", run)

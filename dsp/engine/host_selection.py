@@ -206,13 +206,18 @@ def probe_and_select_http_followup_endpoints(
             )
         )
 
-    for stats, _score in ordered:
-        if stats.host in selected_hosts:
-            continue
-        _append_endpoint(stats)
+    if max_hosts == 1:
+        for stats, _score in ordered:
+            _append_endpoint(stats)
+            break
+    else:
+        for stats, _score in ordered:
+            if stats.host in selected_hosts:
+                continue
+            _append_endpoint(stats)
 
-    for stats, _score in ordered:
-        _append_endpoint(stats)
+        for stats, _score in ordered:
+            _append_endpoint(stats)
 
     primary_reason = selected[0].selection_reason if selected else ""
     return HttpFollowupSelection(

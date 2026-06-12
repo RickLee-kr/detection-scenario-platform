@@ -60,14 +60,13 @@ _SCENARIO_PROFILE_PARAMS: dict[str, dict[str, dict[str, Any]]] = {
             "include_attack_paths": True,
         },
         "normal": {
-            "max_hosts": 3,
-            "max_per_host": 150,
+            "max_hosts": 1,
+            "max_per_host": 300,
             "max_total": 300,
             "timeout": 2.0,
             "concurrency": 32,
             "include_attack_paths": True,
-            "abnormal_ua_ratio": 0.25,
-            "min_requests_per_target": 100,
+            "abnormal_ua_ratio": 0.10,
         },
         "high": {
             "max_hosts": 1,
@@ -85,7 +84,7 @@ _SCENARIO_PROFILE_PARAMS: dict[str, dict[str, dict[str, Any]]] = {
     },
     "sql_injection": {
         "low": {"max_hosts": 1, "max_per_host": 3, "max_total": 5, "timeout": 15.0},
-        "normal": {"max_hosts": 2, "max_per_host": 10, "max_total": 20, "timeout": 10.0},
+        "normal": {"max_hosts": 2, "max_per_host": 100, "max_total": 200, "timeout": 10.0},
         "high": {"max_hosts": 3, "max_per_host": 25, "max_total": 50, "timeout": 5.0},
     },
     "port_sweep": {

@@ -251,7 +251,7 @@ def run(
     max_per_host = int(params.get("max_per_host", MAX_REQUESTS_PER_HOST_DEFAULT))
     max_total = int(params.get("max_total", MAX_REQUESTS_TOTAL_DEFAULT))
     min_requests_per_target = int(params.get("min_requests_per_target", 100))
-    abnormal_ua_ratio = float(params.get("abnormal_ua_ratio", 0.25))
+    abnormal_ua_ratio = float(params.get("abnormal_ua_ratio", 0.10))
     include_attack_paths = bool(params.get("include_attack_paths", True))
     concurrency = max(1, int(params.get("concurrency", DEFAULT_CONCURRENCY)))
     transport = str(params.get("transport", "auto"))

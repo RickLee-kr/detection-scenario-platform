@@ -156,7 +156,7 @@ def attach_followup_user_agents(
     plans: list,
     *,
     campaign: str,
-    abnormal_ratio: float = 0.25,
+    abnormal_ratio: float = 0.10,
     header_builder,
 ) -> tuple[list, dict[str, int | float]]:
     """Assign mixed normal/scanner UA while keeping attack paths on every request."""

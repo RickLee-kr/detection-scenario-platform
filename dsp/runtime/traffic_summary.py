@@ -76,6 +76,8 @@ def build_traffic_summary(
             started = _last_evidence(events, sid, "ssh_failure_started")
         if not started:
             started = _last_evidence(events, sid, "smb_scenario_started")
+        if not started:
+            started = _last_evidence(events, sid, "sql_injection_started")
 
         completed = _last_evidence(events, sid, f"{sid}_completed")
         if not completed:
@@ -86,6 +88,8 @@ def build_traffic_summary(
             completed = _last_evidence(events, sid, "ssh_failure_completed")
         if not completed:
             completed = _last_evidence(events, sid, "smb_scenario_completed")
+        if not completed:
+            completed = _last_evidence(events, sid, "sql_injection_completed")
 
         skipped = _last_evidence(events, sid, f"{sid}_skipped")
         if not skipped:
@@ -177,6 +181,17 @@ def build_traffic_summary(
                 "skipped_no_open_service": completed.get("skipped_no_open_service", False),
                 "auth_attempts": 0,
                 "auth_failed": 0,
+            })
+        elif sid == "sql_injection":
+            scenario_summary.update({
+                "requests_planned": started.get("planned_requests", 0),
+                "requests_sent": completed.get("requests_sent") or completed.get("request_count", 0),
+                "responses_received": completed.get("response_count", 0),
+                "payload_count": completed.get("payload_count", 0),
+                "payload_category_distribution": completed.get("payload_category_distribution", {}),
+                "transport_distribution": completed.get("transport_distribution", {}),
+                "duration_sec": completed.get("duration_sec"),
+                "sql_injection_requests_jsonl": completed.get("sql_injection_requests_jsonl", ""),
             })
 
         summary["scenarios"][sid] = scenario_summary
