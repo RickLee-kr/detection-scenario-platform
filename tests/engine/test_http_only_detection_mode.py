@@ -216,10 +216,12 @@ def test_target_selection_host_selectors_exist():
         service_endpoints={"http_targets": [("10.10.10.20", 8080)]},
         discovery_enabled=True,
     )
-    http_hosts = resolve_scenario_targets("http_followup", targets, {"max_hosts": 2})
-    sqli_hosts = resolve_scenario_targets("sql_injection", targets, {"max_hosts": 2})
-    assert http_hosts == ["10.10.10.20"]
-    assert sqli_hosts == ["10.10.10.20"]
+    http_targets = resolve_scenario_targets("http_followup", targets, {"max_hosts": 2})
+    sqli_targets = resolve_scenario_targets("sql_injection", targets, {"max_hosts": 2})
+    assert http_targets
+    assert sqli_targets
+    assert http_targets[0].startswith("10.10.10.20:")
+    assert sqli_targets[0].startswith("10.10.10.20:")
 
 
 def _only_https_targets() -> TargetSet:
@@ -285,3 +287,100 @@ def test_sql_injection_executor_skips_when_only_https():
     assert sq_summary["skipped"] is True
     assert sq_summary["skip_reason"] == SKIP_REASON_HTTP_TARGETS_NOT_FOUND
     assert sq_summary["https_targets_skipped"] == ["10.10.10.21:8443"]
+
+
+def test_cached_endpoint_selection_preserves_port_into_executor(monkeypatch):
+    from dsp.engine.host_selection import (
+        HTTP_ENDPOINT_SELECTION_CACHE_KEY,
+        cache_http_endpoint_selection,
+        selection_to_cache,
+    )
+    from dsp.engine import RunConfig
+
+    def fake_probe(host, port, scheme, *, client, index=0):
+        return _probe_stats_for(host, port)
+
+    monkeypatch.setattr(
+        "dsp.protocols.http.target_probe.probe_http_endpoint",
+        fake_probe,
+    )
+
+    targets = TargetSet(
+        target_net="221.139.249.0/24",
+        service_hosts={
+            "http_targets": ["221.139.249.110", "221.139.249.118"],
+        },
+        service_endpoints={
+            "http_targets": [
+                ("221.139.249.110", 80),
+                ("221.139.249.118", 9000),
+            ],
+        },
+        discovery_enabled=True,
+    )
+    scenario_params = {
+        "http_followup": {"max_hosts": 2, "max_total": 10, "max_per_host": 5},
+        "sql_injection": {"max_hosts": 2, "max_total": 10, "max_per_host": 5},
+    }
+    cache_http_endpoint_selection(
+        scenario_params,
+        scenario_ids=["http_followup", "sql_injection"],
+        targets=targets,
+        dry_run=True,
+    )
+    cache = scenario_params["http_followup"][HTTP_ENDPOINT_SELECTION_CACHE_KEY]
+    selected_ports = {(ep["host"], ep["port"]) for ep in cache["endpoints"]}
+    assert selected_ports == {("221.139.249.110", 8080), ("221.139.249.118", 9000)}
+
+    store = EventStore(":memory:")
+    run_id = "cached_endpoints"
+    store.open_run(run_id)
+    ctx = RunContext(
+        run_id=run_id,
+        target_net="221.139.249.0/24",
+        event_store=store,
+        config=RunConfig(dry_run=True, scenario_params=scenario_params),
+        dry_run=True,
+    )
+    http_followup_executor.run(ctx, targets, scenario_params["http_followup"])
+    completed = [e for e in store.list_events(run_id) if e.event == "http_followup_completed"]
+    assert completed
+    assert completed[0].evidence["requests_sent"] > 0
+    assert 9000 in completed[0].evidence["ports_used"]
+
+
+def test_empty_endpoint_selection_emits_skip_not_zero_send_completed(monkeypatch):
+    def fake_probe(host, port, scheme, *, client, index=0):
+        stats = HttpEndpointProbeStats(host=host, port=port, scheme="http")
+        stats.timeouts = 5
+        return stats
+
+    monkeypatch.setattr(
+        "dsp.protocols.http.target_probe.probe_http_endpoint",
+        fake_probe,
+    )
+
+    targets = TargetSet(
+        target_net="221.139.249.0/24",
+        service_hosts={"http_targets": ["221.139.249.110"]},
+        service_endpoints={"http_targets": [("221.139.249.110", 80)]},
+        discovery_enabled=True,
+    )
+    store = EventStore(":memory:")
+    run_id = "empty_selection_skip"
+    store.open_run(run_id)
+    ctx = RunContext(
+        run_id=run_id,
+        target_net="221.139.249.0/24",
+        event_store=store,
+        config=RunConfig(dry_run=True),
+        dry_run=True,
+    )
+    http_followup_executor.run(ctx, targets, {"max_hosts": 2})
+    skipped = [e for e in store.list_events(run_id) if e.event == "http_followup_skipped"]
+    completed = [e for e in store.list_events(run_id) if e.event == "http_followup_completed"]
+    assert skipped
+    assert not completed
+    assert skipped[0].evidence["reason"] == SKIP_REASON_HTTP_TARGETS_NOT_FOUND
+    assert skipped[0].evidence["requests_sent"] == 0
+    assert skipped[0].evidence["target_probe"]

@@ -26,8 +26,8 @@ _SELECTOR_SPECS: dict[str, tuple[str, bool]] = {
     "port_sweep": ("select_port_sweep_hosts", True),
     "dns_tunnel": ("select_tunnel_targets", True),
     "dga": ("select_dga_resolver", False),
-    "http_followup": ("select_followup_hosts", True),
-    "sql_injection": ("select_sqli_hosts", True),
+    "http_followup": ("select_followup_endpoint_targets", True),
+    "sql_injection": ("select_sqli_endpoint_targets", True),
     "ldap_enumeration": ("select_ldap_hosts", True),
     "smb_login_failure": ("select_smb_hosts", True),
     "ssh_failure": ("select_ssh_hosts", True),
@@ -108,7 +108,11 @@ def scenario_start_metadata(
         meta["planned_probes"] = min(len(hosts), max_hosts) * max_ports
         meta["concurrency"] = int(params.get("concurrency", 32))
     elif scenario_id == "http_followup":
-        from dsp.engine.host_selection import format_selected_target_labels, probe_and_select_http_followup_endpoints
+        from dsp.engine.host_selection import (
+            SKIP_REASON_HTTP_TARGETS_NOT_FOUND,
+            format_selected_target_labels,
+            resolve_http_endpoint_selection,
+        )
         from dsp.protocols.http import HttpClient, plan_followup_requests
         from dsp.protocols.http.curl_transport import curl_available
         from dsp.protocols.http.urls import compute_requests_per_target
@@ -119,10 +123,16 @@ def scenario_start_metadata(
         min_requests_per_target = int(params.get("min_requests_per_target", 100))
         abnormal_ua_ratio = float(params.get("abnormal_ua_ratio", 0.25))
         client = HttpClient(mode="live", timeout=float(params.get("timeout", 2.0)))
-        selection = probe_and_select_http_followup_endpoints(
+        selection = resolve_http_endpoint_selection(
             targets, params, max_hosts=max_hosts, client=client
         )
-        if selection.endpoints:
+        meta["target_probe"] = selection.probe_summaries
+        meta["probe_summaries"] = selection.probe_summaries
+        meta["rejected_targets"] = selection.rejected_targets
+        if not selection.endpoints:
+            meta["skip_reason"] = selection.skip_reason or SKIP_REASON_HTTP_TARGETS_NOT_FOUND
+            meta["selected_targets"] = []
+        else:
             ep = selection.endpoints[0]
             meta["target"] = f"{ep.scheme}://{ep.host}:{ep.port}"
             meta["selected_http_target_reason"] = selection.selected_http_target_reason
@@ -148,9 +158,7 @@ def scenario_start_metadata(
             meta["abnormal_ua_ratio"] = f"{abnormal_ua_ratio:.0%}"
             meta["expected_url_scan_distribution"] = requests_per_target
             meta["targets"] = len(requests_per_target)
-            meta["target_probe"] = selection.probe_summaries
-            meta["probe_summaries"] = selection.probe_summaries
-        meta["planned_requests"] = max_total
+            meta["planned_requests"] = len(planned)
         meta["transport"] = "curl" if curl_available() else "urllib"
         meta["evidence"] = "http_followup_requests.jsonl"
     elif scenario_id == "dns_tunnel":
@@ -160,5 +168,27 @@ def scenario_start_metadata(
     elif scenario_id in ("ssh_failure", "ldap_enumeration", "kerberos_failure", "smb_login_failure"):
         meta["planned_attempts"] = int(params.get("max_total", 0)) or None
     elif scenario_id == "sql_injection":
-        meta["planned_requests"] = int(params.get("max_total", params.get("max_payloads", 10)))
+        from dsp.engine.host_selection import (
+            SKIP_REASON_HTTP_TARGETS_NOT_FOUND,
+            format_selected_target_labels,
+            resolve_http_endpoint_selection,
+        )
+        from dsp.protocols.http.client import HttpClient
+
+        max_hosts = int(params.get("max_hosts", 2))
+        max_total = int(params.get("max_total", params.get("max_payloads", 10)))
+        client = HttpClient(mode="live", timeout=float(params.get("timeout", 10.0)))
+        selection = resolve_http_endpoint_selection(
+            targets, params, max_hosts=max_hosts, client=client
+        )
+        meta["target_probe"] = selection.probe_summaries
+        meta["probe_summaries"] = selection.probe_summaries
+        meta["rejected_targets"] = selection.rejected_targets
+        if not selection.endpoints:
+            meta["skip_reason"] = selection.skip_reason or SKIP_REASON_HTTP_TARGETS_NOT_FOUND
+            meta["selected_targets"] = []
+        else:
+            meta["selected_targets"] = format_selected_target_labels(selection.endpoints)
+            meta["selected_http_target_reason"] = selection.selected_http_target_reason
+            meta["planned_requests"] = max_total
     return {k: v for k, v in meta.items() if v is not None}

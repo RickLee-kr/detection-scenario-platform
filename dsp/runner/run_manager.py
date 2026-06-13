@@ -19,6 +19,7 @@ from dsp.detection.factory import (
 from dsp.detection.manager import DetectionManager
 from dsp.detection.reporting import build_detection_confirmation_entries
 from dsp.engine import RunConfig, RunContext, resolve_targets
+from dsp.engine.host_selection import cache_http_endpoint_selection
 from dsp.evidence import EvidenceExportRequest, EvidenceExporter
 from dsp.execution import ExecutionContext, create_execution_provider
 from dsp.execution.remote import RemoteEventCollectionRequest, RemoteEventCollector
@@ -346,6 +347,12 @@ class RunManager:
                     "alive_hosts": targets.discovery_meta.get("alive_hosts", []),
                     "service_hosts": targets.discovery_meta.get("service_hosts", {}),
                 },
+            )
+            cache_http_endpoint_selection(
+                config.scenario_params,
+                scenario_ids=scenario_ids,
+                targets=targets,
+                dry_run=dry_run,
             )
             selected = resolve_selected_targets_by_protocol(
                 scenario_ids,

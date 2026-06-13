@@ -131,6 +131,9 @@ def build_traffic_summary(
                 or started.get("target_probe")
                 or completed.get("probe_summaries")
                 or started.get("probe_summaries", []),
+                "rejected_targets": completed.get("rejected_targets")
+                or started.get("rejected_targets")
+                or skipped.get("rejected_targets", []),
                 "redirect_only_candidates": completed.get("redirect_only_candidates")
                 or started.get("redirect_only_candidates", []),
                 "target_count": completed.get("target_count", len(completed.get("target_distribution", {}))),
@@ -192,6 +195,9 @@ def build_traffic_summary(
                 or started.get("target_probe")
                 or completed.get("probe_summaries")
                 or started.get("probe_summaries", []),
+                "rejected_targets": completed.get("rejected_targets")
+                or started.get("rejected_targets")
+                or skipped.get("rejected_targets", []),
                 "selected_targets": completed.get("selected_targets")
                 or started.get("selected_targets", []),
                 "sql_injection_requests_jsonl": completed.get("sql_injection_requests_jsonl", ""),
