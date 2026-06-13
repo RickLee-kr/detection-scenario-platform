@@ -127,6 +127,10 @@ def build_traffic_summary(
                 or started.get("selected_http_target_reason", ""),
                 "redirect_only_warning": completed.get("redirect_only_warning", False),
                 "probe_summaries": completed.get("probe_summaries") or started.get("probe_summaries", []),
+                "target_probe": completed.get("target_probe")
+                or started.get("target_probe")
+                or completed.get("probe_summaries")
+                or started.get("probe_summaries", []),
                 "redirect_only_candidates": completed.get("redirect_only_candidates")
                 or started.get("redirect_only_candidates", []),
                 "target_count": completed.get("target_count", len(completed.get("target_distribution", {}))),
@@ -181,6 +185,15 @@ def build_traffic_summary(
                 "http_targets_not_found": skipped.get("http_targets_not_found", False)
                 or skipped.get("reason") == "HTTP_TARGETS_NOT_FOUND",
                 "duration_sec": completed.get("duration_sec"),
+                "selected_http_target_reason": completed.get("selected_http_target_reason")
+                or started.get("selected_http_target_reason", ""),
+                "probe_summaries": completed.get("probe_summaries") or started.get("probe_summaries", []),
+                "target_probe": completed.get("target_probe")
+                or started.get("target_probe")
+                or completed.get("probe_summaries")
+                or started.get("probe_summaries", []),
+                "selected_targets": completed.get("selected_targets")
+                or started.get("selected_targets", []),
                 "sql_injection_requests_jsonl": completed.get("sql_injection_requests_jsonl", ""),
             })
 

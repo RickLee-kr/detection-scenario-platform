@@ -10,6 +10,7 @@ from typing import Any
 
 from dsp.engine.host_selection import (
     HttpFollowupEndpoint,
+    format_selected_target_labels,
     probe_and_select_http_followup_endpoints,
 )
 from dsp.engine.scenario_engine import RunContext, TargetSet
@@ -234,8 +235,8 @@ def run(
         abnormal_ratio=abnormal_ua_ratio,
     )
     requests_per_target = _requests_per_target(plans)
-    selected_targets = sorted(requests_per_target)
-    concentrated_target = selected_targets[0] if len(selected_targets) == 1 else ""
+    selected_targets = format_selected_target_labels(endpoints)
+    concentrated_target = selected_targets[0].split(" ", 1)[0] if len(selected_targets) == 1 else ""
     _print_http_followup_started(
         requests_per_target=requests_per_target,
         abnormal_ua_ratio=abnormal_ua_ratio,
@@ -287,6 +288,7 @@ def run(
                 "https_targets": targets.hosts_for_capability("https_targets"),
                 "selected_http_target_reason": selection.selected_http_target_reason,
                 "probe_summaries": selection.probe_summaries,
+                "target_probe": selection.probe_summaries,
                 "redirect_only_candidates": selection.redirect_only_candidates,
                 "selected_targets": selected_targets,
                 "concentrated_target": concentrated_target,
@@ -465,6 +467,7 @@ def run(
                 "response_code_distribution": response_code_distribution,
                 "redirect_only_warning": redirect_only_warning,
                 "probe_summaries": selection.probe_summaries,
+                "target_probe": selection.probe_summaries,
                 "redirect_only_candidates": selection.redirect_only_candidates,
                 "http_followup_requests_jsonl": str(request_log_path) if request_log_path else "",
                 "http_wire_evidence_jsonl": str(wire_log_path) if wire_log_path else "",

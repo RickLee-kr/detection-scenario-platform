@@ -10,6 +10,7 @@ from typing import Any
 
 from dsp.engine.host_selection import (
     HttpFollowupSelection,
+    format_selected_target_labels,
     probe_and_select_http_followup_endpoints,
 )
 from dsp.engine.scenario_engine import RunContext, TargetSet
@@ -193,6 +194,7 @@ def run(
 
     endpoints = [(ep.host, ep.port) for ep in selection.endpoints]
     hosts = [ep.host for ep in selection.endpoints]
+    selected_targets = format_selected_target_labels(selection.endpoints)
     plans = plan_sqli_requests(
         hosts,
         endpoints=endpoints,
@@ -222,12 +224,24 @@ def run(
             source=source,
             evidence={
                 "hosts": hosts,
-                "endpoints": [{"host": h, "port": p} for h, p in endpoints],
+                "endpoints": [
+                    {
+                        "host": ep.host,
+                        "port": ep.port,
+                        "scheme": ep.scheme,
+                        "selection_reason": ep.selection_reason,
+                    }
+                    for ep in selection.endpoints
+                ],
                 "planned_requests": len(plans),
                 "max_total": max_total,
                 "mode": mode,
                 "schemes_used": schemes_used,
                 "https_targets_skipped": selection.https_targets_skipped,
+                "selected_http_target_reason": selection.selected_http_target_reason,
+                "probe_summaries": selection.probe_summaries,
+                "target_probe": selection.probe_summaries,
+                "selected_targets": selected_targets,
                 "payload_categories": sorted(SQLI_PAYLOAD_CATEGORIES),
             },
         )
@@ -350,6 +364,10 @@ def run(
                 "sample_payloads": sample_payloads,
                 "payload_category_distribution": dict(category_counter),
                 "transport_distribution": dict(transport_counter),
+                "selected_http_target_reason": selection.selected_http_target_reason,
+                "probe_summaries": selection.probe_summaries,
+                "target_probe": selection.probe_summaries,
+                "selected_targets": selected_targets,
                 "sql_injection_requests_jsonl": str(request_log_path) if request_log_path else "",
                 "sql_wire_evidence_jsonl": str(wire_log_path) if wire_log_path else "",
             },

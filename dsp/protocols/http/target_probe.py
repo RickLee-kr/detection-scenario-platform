@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from dsp.protocols.http.client import HttpClient
-from dsp.protocols.http.urls import PlannedHttpRequest
+from dsp.protocols.http.urls import HTTP_PORT_PRIORITY, PlannedHttpRequest
 from dsp.protocols.http.user_agents import pick_rare_user_agent
 
 # stellar_poc_followup.sh build_http_url_scan_probe_paths_remote_cmd paths
@@ -120,34 +120,86 @@ def probe_http_endpoint(
     return stats
 
 
+def has_response_generating_probe(stats: HttpEndpointProbeStats) -> bool:
+    """True when probe received at least one HTTP status code."""
+    return bool(stats.status_counts)
+
+
+def is_no_response_probe(stats: HttpEndpointProbeStats) -> bool:
+    """True when probe saw only timeouts/resets with no HTTP status."""
+    return not stats.status_counts
+
+
+def port_priority_rank(port: int) -> int:
+    """Lower rank = earlier in HTTP_PORT_PRIORITY (used as final tiebreaker)."""
+    try:
+        return HTTP_PORT_PRIORITY.index(port)
+    except ValueError:
+        return len(HTTP_PORT_PRIORITY)
+
+
+def probe_quality_sort_key(stats: HttpEndpointProbeStats) -> tuple[int, int, int]:
+    """
+    Sort key for endpoint selection — lower tuple = higher priority.
+
+    Priority: 400/404 eligible > other responses > redirect-only > no response,
+    then detection_score, then port priority.
+    """
+    if is_eligible_url_scan_target(stats):
+        tier = 0
+    elif has_response_generating_probe(stats):
+        tier = 1
+    elif stats.is_redirect_only:
+        tier = 2
+    else:
+        tier = 3
+    return (tier, -stats.detection_score(), port_priority_rank(stats.port))
+
+
+def probe_all_http_candidates(
+    candidates: list[tuple[str, int, str]],
+    *,
+    client: HttpClient,
+) -> list[HttpEndpointProbeStats]:
+    """Probe every HTTP candidate endpoint (all allowed ports per host)."""
+    probed: list[HttpEndpointProbeStats] = []
+    for idx, (host, port, scheme) in enumerate(candidates):
+        probed.append(probe_http_endpoint(host, port, scheme, client=client, index=idx))
+    return probed
+
+
+def pick_best_endpoint_per_host(
+    stats_list: list[HttpEndpointProbeStats],
+) -> dict[str, HttpEndpointProbeStats]:
+    """
+    Pick the best probed endpoint per host.
+
+    Never returns a no-response endpoint when a response-generating endpoint
+    exists on the same host.
+    """
+    groups: dict[str, list[HttpEndpointProbeStats]] = {}
+    for stats in stats_list:
+        groups.setdefault(stats.host, []).append(stats)
+
+    best: dict[str, HttpEndpointProbeStats] = {}
+    for host, host_stats in groups.items():
+        responding = [s for s in host_stats if has_response_generating_probe(s)]
+        pool = responding if responding else host_stats
+        best[host] = min(pool, key=probe_quality_sort_key)
+    return best
+
+
 def rank_probe_candidates(
     candidates: list[tuple[str, int, str]],
     *,
     client: HttpClient,
-    max_probe: int = 8,
+    max_probe: int | None = None,
 ) -> list[tuple[HttpEndpointProbeStats, int]]:
-    """Probe and rank endpoints; returns (stats, combined_score) descending."""
-    ranked: list[tuple[HttpEndpointProbeStats, int]] = []
-    for idx, (host, port, scheme) in enumerate(candidates[:max_probe]):
-        stats = probe_http_endpoint(host, port, scheme, client=client, index=idx)
-        port_bonus = _port_priority_bonus(port)
-        scheme_bonus = 10 if scheme == "http" else 0
-        combined = stats.detection_score() + port_bonus + scheme_bonus
-        ranked.append((stats, combined))
-    ranked.sort(key=lambda item: item[1], reverse=True)
-    return ranked
-
-
-def _port_priority_bonus(port: int) -> int:
-    """HTTP detection ports only — prefer non-80 when errors available."""
-    return {
-        8080: 700,
-        8008: 680,
-        8000: 600,
-        8888: 580,
-        9000: 550,
-        80: 200,
-    }.get(port, 100)
+    """Probe and rank endpoints; returns (stats, detection_score) best-first."""
+    probe_set = candidates if max_probe is None else candidates[:max_probe]
+    probed = probe_all_http_candidates(probe_set, client=client)
+    ranked = sorted(probed, key=probe_quality_sort_key)
+    return [(stats, stats.detection_score()) for stats in ranked]
 
 
 def selection_reason_for(stats: HttpEndpointProbeStats) -> str:

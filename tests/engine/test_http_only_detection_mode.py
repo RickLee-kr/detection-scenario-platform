@@ -5,16 +5,70 @@ from __future__ import annotations
 from dsp.engine import RunConfig
 from dsp.engine.host_selection import (
     SKIP_REASON_HTTP_TARGETS_NOT_FOUND,
+    format_selected_target_labels,
     probe_and_select_http_followup_endpoints,
 )
 from dsp.engine.scenario_engine import RunContext, TargetSet
 from dsp.event_store import EventStore
+from dsp.protocols.http.client import HttpClient
 from dsp.protocols.http.sqli_payloads import plan_sqli_requests
+from dsp.protocols.http.target_probe import HttpEndpointProbeStats
 from dsp.protocols.http.urls import HTTP_DETECTION_PORTS, HTTP_PORT_PRIORITY, HTTPS_PORT_PRIORITY, PORT_PRIORITY, plan_followup_requests
 from dsp.runtime.traffic_summary import build_traffic_summary
 from scenarios.http_followup import executor as http_followup_executor
 from scenarios.sql_injection import executor as sql_injection_executor
 
+
+def _probe_stats_for(host: str, port: int) -> HttpEndpointProbeStats:
+    stats = HttpEndpointProbeStats(host=host, port=port, scheme="http")
+    if (host, port) == ("221.139.249.110", 8080):
+        stats.status_counts = {400: 2}
+    elif (host, port) == ("221.139.249.118", 8080):
+        stats.timeouts = 7
+    elif (host, port) == ("221.139.249.118", 9000):
+        stats.status_counts = {400: 3}
+    return stats
+
+
+def test_probe_quality_prefers_response_endpoint_over_same_host_no_response(monkeypatch):
+    """Regression: 118:9000 must win over 118:8080 when only 9000 returns 400."""
+
+    def fake_probe(host, port, scheme, *, client, index=0):
+        return _probe_stats_for(host, port)
+
+    monkeypatch.setattr(
+        "dsp.protocols.http.target_probe.probe_http_endpoint",
+        fake_probe,
+    )
+
+    targets = TargetSet(
+        target_net="221.139.249.0/24",
+        service_hosts={"http_targets": ["221.139.249.110", "221.139.249.118"]},
+        service_endpoints={
+            "http_targets": [
+                ("221.139.249.110", 8080),
+                ("221.139.249.118", 8080),
+                ("221.139.249.118", 9000),
+            ],
+        },
+        discovery_enabled=True,
+    )
+    selection = probe_and_select_http_followup_endpoints(
+        targets,
+        {},
+        max_hosts=2,
+        client=HttpClient(mode="live"),
+    )
+
+    selected = {(ep.host, ep.port) for ep in selection.endpoints}
+    assert selected == {("221.139.249.110", 8080), ("221.139.249.118", 9000)}
+    assert all(ep.selection_reason == "error_responses_available" for ep in selection.endpoints)
+    assert selection.probe_summaries
+    labels = set(format_selected_target_labels(selection.endpoints))
+    assert labels == {
+        "221.139.249.110:8080 (error_responses_available)",
+        "221.139.249.118:9000 (error_responses_available)",
+    }
 
 def test_port_priority_is_http_only():
     assert PORT_PRIORITY == HTTP_PORT_PRIORITY
