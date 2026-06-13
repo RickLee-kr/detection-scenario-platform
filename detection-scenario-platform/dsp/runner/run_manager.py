@@ -84,6 +84,7 @@ class RunManager:
         target_net: str = "10.10.10.0/24",
         dry_run: bool = False,
         scenario_params: dict[str, dict] | None = None,
+        traffic_profile: str = "balanced",
         confirm_detection: bool = False,
         detection_provider: str = "stellar",
         stellar_client: str = "manual",
@@ -200,6 +201,7 @@ class RunManager:
                 "target_net": target_net,
                 "dry_run": dry_run,
                 "execution_provider": execution_provider,
+                "traffic_profile": traffic_profile,
             },
             dsp_version=DSP_VERSION,
         )
@@ -215,7 +217,7 @@ class RunManager:
             config=config,
             dry_run=dry_run,
         )
-        targets = resolve_targets(target_net)
+        targets = resolve_targets(target_net, discovery=True, dry_run=dry_run)
 
         provider = self._create_execution_provider(
             execution_provider,
@@ -312,6 +314,21 @@ class RunManager:
         reporter.write_report_json(run_dir / "report.json", report)
 
         store.export_jsonl(run_dir / "events.jsonl")
+
+        from dsp.runtime.traffic_summary import build_traffic_summary
+
+        traffic_summary = build_traffic_summary(
+            store,
+            run_id=run_id,
+            scenario_ids=scenario_ids,
+            targets=targets,
+            traffic_profile=traffic_profile,
+        )
+        (run_dir / "traffic_summary.json").write_text(
+            json.dumps(traffic_summary, indent=2),
+            encoding="utf-8",
+        )
+
         store.close_run()
         self._write_run_json(run_dir / "run.json", run)
 

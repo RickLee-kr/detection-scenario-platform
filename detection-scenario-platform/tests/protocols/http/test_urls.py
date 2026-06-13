@@ -7,6 +7,7 @@ import pytest
 from dsp.protocols.base import HttpProtocolError
 from dsp.protocols.http.urls import (
     FIXED_PATHS,
+    HTTP_PORT_PRIORITY,
     PORT_PRIORITY,
     build_url,
     plan_followup_requests,
@@ -48,8 +49,15 @@ def test_plan_followup_respects_max_total():
 
 
 def test_plan_followup_uses_port_priority():
-    assert select_port_for_host(0) == PORT_PRIORITY[0]
-    assert select_port_for_host(1) == PORT_PRIORITY[1]
+    assert select_port_for_host(0) == HTTP_PORT_PRIORITY[0]
+    assert select_port_for_host(1) == HTTP_PORT_PRIORITY[1]
+
+
+def test_plan_followup_prefers_http_ports():
+    from dsp.protocols.http.urls import HTTP_PORT_PRIORITY
+
+    assert PORT_PRIORITY[0] == 80
+    assert HTTP_PORT_PRIORITY[0] == 80
 
 
 def test_plan_followup_requires_host():
@@ -59,5 +67,14 @@ def test_plan_followup_requires_host():
 
 def test_planned_request_url_property():
     plans = plan_followup_requests(["lab.local"], max_total=1)
-    assert plans[0].path in FIXED_PATHS
-    assert plans[0].url.startswith("https://")
+    from dsp.protocols.http.urls import ATTACK_SCAN_PATHS
+
+    assert plans[0].path in ATTACK_SCAN_PATHS
+    assert plans[0].url.startswith("http://")
+    assert plans[0].port == 80
+
+
+def test_plan_followup_cycles_paths_for_volume():
+    plans = plan_followup_requests(["10.10.10.20"], max_per_host=50, max_total=50)
+    assert len(plans) == 50
+    assert plans[0].path != plans[-1].path or len({p.path for p in plans}) > 1

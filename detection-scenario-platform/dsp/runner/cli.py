@@ -3,11 +3,54 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
+from pathlib import Path
 
 from dsp import __version__
 from dsp.plugins import PluginLoader
 from dsp.runner.run_manager import RunManager
+from dsp.runtime.traffic_profiles import (
+    PARITY_SCENARIO_BUNDLE,
+    build_scenario_params_for_bundle,
+    parse_traffic_profile,
+)
+
+def _print_http_followup_console(summary_path: Path) -> None:
+    try:
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    http = summary.get("scenarios", {}).get("http_followup")
+    if not http:
+        return
+    reason = http.get("selected_http_target_reason")
+    if reason:
+        print(f"HTTP selected_http_target_reason: {reason}")
+    dist = http.get("response_code_distribution") or {}
+    if dist:
+        dist_text = ", ".join(f"{code}={count}" for code, count in sorted(dist.items()))
+        print(f"HTTP response_code_distribution: {dist_text}")
+    if http.get("redirect_only_warning"):
+        print(
+            "WARN: HTTP URL scan responses are redirect-only — "
+            "target may be unsuitable for URL/User-Agent detection parity"
+        )
+    abnormal = http.get("abnormal_user_agents")
+    normal = http.get("normal_user_agents")
+    if abnormal is not None and normal is not None:
+        ratio = http.get("abnormal_user_agent_ratio", 0.0)
+        print(
+            f"HTTP UA mix: abnormal_user_agents={abnormal} "
+            f"normal_user_agents={normal} abnormal_user_agent_ratio={ratio}"
+        )
+    concentrated = http.get("concentrated_target")
+    if concentrated:
+        print(f"HTTP concentrated_target: {concentrated}")
+    target_dist = http.get("target_distribution") or {}
+    if target_dist:
+        print(f"HTTP target_distribution: {target_dist}")
+
 
 _DETECTION_EPILOG = """
 Detection confirmation (S3) examples:
@@ -36,9 +79,17 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
 
     run_parser = sub.add_parser("run", help="Execute scenarios")
-    run_parser.add_argument("--scenarios", required=True, help="Comma-separated scenario IDs")
+    run_parser.add_argument(
+        "--scenarios",
+        help="Comma-separated scenario IDs (default: parity bundle when --profile is set)",
+    )
     run_parser.add_argument("--dry-run", action="store_true", help="Dry-run mode (no network)")
     run_parser.add_argument("--target-net", default="10.10.10.0/24", help="Target CIDR")
+    run_parser.add_argument(
+        "--profile",
+        default="balanced",
+        help="Traffic profile: low, normal, balanced, burst (default: balanced)",
+    )
     run_parser.add_argument(
         "--confirm-detection",
         action="store_true",
@@ -102,12 +153,20 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "run":
-        scenario_ids = [s.strip() for s in args.scenarios.split(",") if s.strip()]
+        profile = parse_traffic_profile(args.profile)
+        if args.scenarios:
+            scenario_ids = [s.strip() for s in args.scenarios.split(",") if s.strip()]
+        else:
+            scenario_ids = list(PARITY_SCENARIO_BUNDLE)
+        scenario_params = build_scenario_params_for_bundle(scenario_ids, profile)
+
         manager = RunManager()
         run, run_dir, exit_code = manager.run(
             scenario_ids=scenario_ids,
             target_net=args.target_net,
             dry_run=args.dry_run,
+            scenario_params=scenario_params,
+            traffic_profile=profile,
             confirm_detection=args.confirm_detection,
             detection_provider=args.detection_provider,
             stellar_client=args.stellar_client,
@@ -118,6 +177,10 @@ def main(argv: list[str] | None = None) -> int:
             verify_tls=args.verify_tls,
         )
         print(f"Run {run.run_id} status={run.status.value} dir={run_dir}")
+        summary_path = run_dir / "traffic_summary.json"
+        if summary_path.exists():
+            print(f"Traffic summary: {summary_path}")
+            _print_http_followup_console(summary_path)
         return exit_code
 
     if args.command == "plugins":

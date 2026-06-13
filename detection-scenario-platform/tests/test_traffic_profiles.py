@@ -57,3 +57,18 @@ def test_profile_for_scenario_includes_scenario_params() -> None:
     profile = profile_for_scenario("http_followup", "burst")
     assert profile.name == "burst"
     assert profile.scenario_params["max_total"] == 60
+
+
+def test_normal_profile_port_sweep_full_slash24() -> None:
+    params = scenario_params_for_profile("port_sweep", "normal")
+    assert params["max_hosts"] == 254
+    assert params["max_ports"] == 10
+
+
+def test_normal_profile_http_includes_attack_paths() -> None:
+    params = scenario_params_for_profile("http_followup", "normal")
+    assert params.get("include_attack_paths") is True
+    assert params["max_hosts"] == 2
+    assert params["max_total"] == 300
+    assert params["max_per_host"] == 150
+    assert params["abnormal_ua_ratio"] == 0.10

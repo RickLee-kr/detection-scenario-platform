@@ -28,15 +28,22 @@ def send_request(
     timeout: float = DEFAULT_TIMEOUT_SEC,
     verify_tls: bool = False,
     headers: dict[str, str] | None = None,
+    body: bytes | None = None,
+    content_type: str | None = None,
 ) -> HttpResponseResult:
     """Send a single HTTP/HTTPS request. Redirects are not followed."""
     request_id = uuid.uuid4().hex[:8]
     evidence: dict[str, Any] = {"url": url, "method": method.upper()}
 
+    request_headers = dict(headers) if headers else {}
+    request_headers.setdefault("User-Agent", "dsp-http-followup/1.0")
+    if content_type:
+        request_headers.setdefault("Content-Type", content_type)
     req = urllib.request.Request(
         url,
+        data=body,
         method=method.upper(),
-        headers=headers or {"User-Agent": "dsp-http-followup/1.0"},
+        headers=request_headers,
     )
     context = None
     if url.lower().startswith("https://"):
@@ -148,6 +155,9 @@ class HttpClient:
                 method=planned.method,
                 timeout=self.timeout,
                 verify_tls=self.verify_tls,
+                headers=planned.headers,
+                body=planned.body,
+                content_type=planned.content_type,
             )
         return self._mock_request(planned, mock_status_code=mock_status_code, mock_outcome=mock_outcome)
 
@@ -191,5 +201,6 @@ class HttpClient:
             method=planned.method,
             host=planned.host,
             port=planned.port,
-            path=planned.path,
+            path=planned.full_path,
+            headers=planned.headers,
         )
