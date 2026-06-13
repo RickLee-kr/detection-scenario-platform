@@ -59,7 +59,7 @@ safety:
   max_events: 500
   max_duration_sec: 300
   allowed_domains: []
-  allowed_ports: [443, 8443, 80, 8080, 8000]
+  allowed_ports: [80, 8080, 8000, 8008, 8888, 9000]
   forbidden_actions:
     - data_exfiltration
     - destructive_sql

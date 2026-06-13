@@ -56,8 +56,6 @@ def test_plan_followup_dual_target_150_requests_each():
 
 
 def test_attach_followup_user_agents_ratio_10_percent():
-    from scenarios.http_followup.executor import _bash_parity_headers
-
     plans = plan_followup_requests(
         endpoints=[("10.0.0.1", 80), ("10.0.0.2", 80)],
         max_hosts=2,
@@ -65,12 +63,7 @@ def test_attach_followup_user_agents_ratio_10_percent():
         max_total=300,
         include_attack_paths=True,
     )
-    enriched, stats = attach_followup_user_agents(
-        plans,
-        campaign="test-campaign",
-        abnormal_ratio=0.10,
-        header_builder=_bash_parity_headers,
-    )
+    enriched, stats = attach_followup_user_agents(plans, abnormal_ratio=0.10)
     assert len(enriched) == 300
     assert stats["abnormal_user_agents_planned"] == 30
     assert stats["normal_user_agents_planned"] == 270

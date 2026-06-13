@@ -8,6 +8,7 @@ from dsp.protocols.http.client import HttpClient
 from dsp.protocols.http.urls import PlannedHttpRequest
 from dsp.protocols.http.user_agents import pick_rare_user_agent
 
+# stellar_poc_followup.sh build_http_url_scan_probe_paths_remote_cmd paths
 PROBE_PATHS = (
     "/WEB-INF/web.xml",
     "/.env",
@@ -15,9 +16,7 @@ PROBE_PATHS = (
     "/.git/config",
     "/api/swagger",
     "/cmd.jsp",
-    "/admin?id=%25%25%25invalid%25%25%25",
-    "/nonexistent-dsp-probe-404",
-    "/../../etc/passwd?file=../../../../WEB-INF/web.xml",
+    "/admin",
 )
 
 REDIRECT_CODES = frozenset({301, 302, 303, 307, 308})
@@ -42,7 +41,9 @@ class HttpEndpointProbeStats:
 
     @property
     def success_count(self) -> int:
-        return sum(count for code, count in self.status_counts.items() if 200 <= code < 300)
+        return sum(
+            count for code, count in self.status_counts.items() if 200 <= code < 300
+        )
 
     @property
     def is_redirect_only(self) -> bool:
@@ -53,6 +54,7 @@ class HttpEndpointProbeStats:
         return self.redirect_count > 0
 
     def detection_score(self) -> int:
+        """Bash http_url_scan_compute_target_detection_score parity."""
         p400 = self.status_counts.get(400, 0)
         p403 = self.status_counts.get(403, 0)
         p404 = self.status_counts.get(404, 0)
@@ -77,6 +79,7 @@ class HttpEndpointProbeStats:
 
 
 def _mock_probe_stats(host: str, port: int, scheme: str, index: int) -> HttpEndpointProbeStats:
+    """Dry-run probe stats — bash run_http_url_scan_target_probe DRY_RUN branch."""
     stats = HttpEndpointProbeStats(host=host, port=port, scheme=scheme)
     case = index % 4
     if case == 0:
@@ -99,6 +102,7 @@ def probe_http_endpoint(
     client: HttpClient,
     index: int = 0,
 ) -> HttpEndpointProbeStats:
+    """Probe candidate endpoint with attack paths; count HTTP status codes."""
     stats = HttpEndpointProbeStats(host=host, port=port, scheme=scheme)
     if client.mode == "mock":
         return _mock_probe_stats(host, port, scheme, index)
@@ -122,6 +126,7 @@ def rank_probe_candidates(
     client: HttpClient,
     max_probe: int = 8,
 ) -> list[tuple[HttpEndpointProbeStats, int]]:
+    """Probe and rank endpoints; returns (stats, combined_score) descending."""
     ranked: list[tuple[HttpEndpointProbeStats, int]] = []
     for idx, (host, port, scheme) in enumerate(candidates[:max_probe]):
         stats = probe_http_endpoint(host, port, scheme, client=client, index=idx)
@@ -134,35 +139,23 @@ def rank_probe_candidates(
 
 
 def _port_priority_bonus(port: int) -> int:
+    """HTTP detection ports only — prefer non-80 when errors available."""
     return {
         8080: 700,
-        8443: 650,
+        8008: 680,
         8000: 600,
+        8888: 580,
         9000: 550,
         80: 200,
-        443: 150,
     }.get(port, 100)
-
-
-def selection_tier(stats: HttpEndpointProbeStats) -> int:
-    """Lower tier wins — error responses beat redirects/timeouts."""
-    if stats.error_response_count > 0:
-        return 0
-    if stats.success_count > 0:
-        return 1
-    if stats.is_redirect_only:
-        return 3
-    return 2
 
 
 def selection_reason_for(stats: HttpEndpointProbeStats) -> str:
     if stats.error_response_count > 0:
         return "error_responses_available"
-    if stats.success_count > 0 and not stats.is_redirect_only:
+    if not stats.is_redirect_only:
         return "not_redirect_only"
-    if stats.is_redirect_only:
-        return "redirect_only_low_priority"
-    return "not_redirect_only"
+    return "redirect_only_low_priority"
 
 
 def is_eligible_url_scan_target(stats: HttpEndpointProbeStats) -> bool:

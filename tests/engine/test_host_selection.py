@@ -30,7 +30,7 @@ def test_http_followup_prefers_plain_http_endpoints():
     assert endpoints[0].port == 8080
 
 
-def test_http_followup_https_fallback_when_no_http():
+def test_http_followup_skipped_when_only_https_targets():
     targets = TargetSet(
         target_net="10.10.10.0/24",
         service_hosts={"https_targets": ["10.10.10.21"]},
@@ -38,9 +38,8 @@ def test_http_followup_https_fallback_when_no_http():
         discovery_enabled=True,
     )
     endpoints, skip = select_http_followup_endpoints(targets, {}, max_hosts=2)
-    assert skip is None
-    assert endpoints[0].scheme == "https"
-    assert endpoints[0].port == 443
+    assert endpoints == []
+    assert skip == "HTTP_TARGETS_NOT_FOUND"
 
 
 def test_http_followup_skipped_no_service():

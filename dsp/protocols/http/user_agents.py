@@ -1,11 +1,11 @@
-"""HTTP User-Agent pools — stellar_poc_followup.sh parity."""
+"""HTTP User-Agent pools — ported from stellar_poc_followup.sh http_ua_pick_*."""
 
 from __future__ import annotations
 
 import random
 import re
 
-# stellar_poc_followup.sh http_ua_pick_normal_local
+# stellar_poc_followup.sh: url_scan burst 0% normal / 50% rare / 50% payload (roll < 10 normal)
 _UA_NORMAL = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -13,7 +13,6 @@ _UA_NORMAL = (
     "(KHTML, like Gecko) Version/17.0 Safari/605.1.15",
 )
 
-# stellar_poc_followup.sh http_ua_pick_rare_scanner_local
 _UA_RARE = (
     "TelemetryCollector/9.7",
     "ReconEngine/5.4",
@@ -64,13 +63,6 @@ _PAYLOAD_OTHER = (
     "<<<<>>>>",
 )
 
-# bash remote python fallback payload_parts (subset)
-_PAYLOAD_JNDI = (
-    "${jndi:ldap://127.0.0.1/a}",
-    "${jndi:rmi://127.0.0.1/exploit}",
-    "${jndi:dns://127.0.0.1/x}",
-)
-
 _RE_SQLI = re.compile(
     r"OR 1=1|pg_sleep|waitfor delay|convert\(int|'='|2\+701",
     re.IGNORECASE,
@@ -104,8 +96,13 @@ def pick_payload_fragment() -> str:
     return random.choice(_PAYLOAD_OTHER)
 
 
-def pick_payload_user_agent() -> str:
-    """Bash pick_payload_ua — rare+payload or payload-only."""
+def pick_user_agent() -> str:
+    """Bash http_ua_pick_local — 10% normal, 40% rare, 50% payload."""
+    roll = random.randrange(100)
+    if roll < 10:
+        return pick_normal_user_agent()
+    if roll < 50:
+        return pick_rare_user_agent()
     if random.randrange(2) == 0:
         return f"{pick_rare_user_agent()} {pick_payload_fragment()}"
     return pick_payload_fragment()
@@ -116,6 +113,7 @@ def is_scanner_user_agent(ua: str) -> bool:
 
 
 def is_payload_only_user_agent(ua: str) -> bool:
+    """True when UA is a pure attack payload string with no scanner token."""
     if is_scanner_user_agent(ua):
         return False
     if any(marker in ua for marker in ("Chrome/120.0.0.0", "Version/17.0 Safari")):
@@ -130,18 +128,13 @@ def is_payload_only_user_agent(ua: str) -> bool:
 
 def pick_url_scan_user_agent() -> str:
     """
-    URL scan UA — scanner exact strings only; attack payload belongs in path/query.
+    URL scan UA policy — scanner exact strings only; payload goes in path/query.
 
-    50% pure scanner UA, 50% scanner UA + payload suffix (never payload-only).
+    Bash url_scan: 50% rare scanner, 50% rare scanner + payload suffix (never payload-only).
     """
     if random.randrange(2) == 0:
         return pick_rare_user_agent()
     return f"{pick_rare_user_agent()} {pick_payload_fragment()}"
-
-
-def pick_burst_user_agent() -> str:
-    """URL scan burst — scanner UA policy (no payload-only User-Agent)."""
-    return pick_url_scan_user_agent()
 
 
 def is_normal_user_agent(ua: str) -> bool:
@@ -149,28 +142,37 @@ def is_normal_user_agent(ua: str) -> bool:
 
 
 def is_abnormal_user_agent(ua: str) -> bool:
+    """True for scanner/rare UA used to trigger User-Agent anomaly detection."""
     return not is_normal_user_agent(ua)
 
 
 def attach_followup_user_agents(
     plans: list,
     *,
-    campaign: str,
     abnormal_ratio: float = 0.10,
-    header_builder,
 ) -> tuple[list, dict[str, int | float]]:
-    """Assign mixed normal/scanner UA while keeping attack paths on every request."""
+    """
+    Assign User-Agent per planned request — abnormal scanner UA vs normal browser UA.
+
+    Attack paths/queries stay on every request; only UA mix changes detection volume.
+    """
     from dsp.protocols.http.urls import PlannedHttpRequest
 
     total = len(plans)
+    if total == 0:
+        return [], {
+            "abnormal_user_agents_planned": 0,
+            "normal_user_agents_planned": 0,
+            "abnormal_ua_ratio": abnormal_ratio,
+        }
+
     ratio = max(0.0, min(1.0, abnormal_ratio))
     abnormal_count = max(0, min(total, round(total * ratio)))
-    abnormal_indices = set(random.sample(range(total), abnormal_count)) if abnormal_count else set()
+    abnormal_indices = set(random.sample(range(total), abnormal_count))
 
     enriched: list[PlannedHttpRequest] = []
     for idx, plan in enumerate(plans):
         ua = pick_url_scan_user_agent() if idx in abnormal_indices else pick_normal_user_agent()
-        body = f"probe={campaign}" if plan.method == "POST" else plan.body
         enriched.append(
             PlannedHttpRequest(
                 host=plan.host,
@@ -178,8 +180,7 @@ def attach_followup_user_agents(
                 path=plan.path,
                 query=plan.query,
                 method=plan.method,
-                body=body,
-                headers=header_builder(plan, campaign=campaign, user_agent=ua),
+                headers={"User-Agent": ua},
             )
         )
 
@@ -188,16 +189,6 @@ def attach_followup_user_agents(
         "normal_user_agents_planned": total - abnormal_count,
         "abnormal_ua_ratio": ratio,
     }
-
-
-def pick_user_agent() -> str:
-    """Bash http_ua_pick_local — 10% normal, 40% rare, 50% payload."""
-    roll = random.randrange(100)
-    if roll < 10:
-        return pick_normal_user_agent()
-    if roll < 50:
-        return pick_rare_user_agent()
-    return pick_payload_user_agent()
 
 
 def classify_user_agent(ua: str) -> str:

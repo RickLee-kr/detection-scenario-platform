@@ -8,24 +8,7 @@ from dsp.engine.scenario_engine import TargetSet
 from dsp.event_store import Event, EventStore
 
 
-def _normalize_event(event: Event | dict[str, Any]) -> dict[str, Any]:
-    """Normalize Event objects, dicts, or to_dict()-capable records for summary."""
-    if isinstance(event, dict):
-        return {
-            "scenario_id": event.get("scenario_id", ""),
-            "event": event.get("event", ""),
-            "evidence": event.get("evidence") or {},
-            "target": event.get("target", ""),
-        }
-    to_dict = getattr(event, "to_dict", None)
-    if callable(to_dict):
-        data = to_dict()
-        return {
-            "scenario_id": data.get("scenario_id", ""),
-            "event": data.get("event", ""),
-            "evidence": data.get("evidence") or {},
-            "target": data.get("target", ""),
-        }
+def _event_dict(event: Event) -> dict[str, Any]:
     return {
         "scenario_id": event.scenario_id,
         "event": event.event,
@@ -54,7 +37,7 @@ def build_traffic_summary(
     traffic_profile: str,
 ) -> dict[str, Any]:
     """Build planned vs actual traffic summary for a run."""
-    events = [_normalize_event(e) for e in store.list_events(run_id)]
+    events = [_event_dict(e) for e in store.list_events(run_id)]
 
     summary: dict[str, Any] = {
         "traffic_profile": traffic_profile,
@@ -97,6 +80,8 @@ def build_traffic_summary(
         if not skipped:
             skipped = _last_evidence(events, sid, "http_followup_skipped")
         if not skipped:
+            skipped = _last_evidence(events, sid, "sql_injection_skipped")
+        if not skipped:
             skipped = _last_evidence(events, sid, "ssh_failure_skipped")
 
         scenario_summary: dict[str, Any] = {
@@ -117,7 +102,6 @@ def build_traffic_summary(
                 "concurrency": started.get("concurrency") or completed.get("concurrency"),
             })
         elif sid == "http_followup":
-            dump_summary = completed.get("request_dump_summary") or {}
             scenario_summary.update({
                 "requests_planned": started.get("planned_requests", 0),
                 "requests_sent": completed.get("request_count") or _count_events(events, sid, "http_request_sent"),
@@ -128,28 +112,25 @@ def build_traffic_summary(
                 "ports_used": completed.get("ports_used", []),
                 "schemes_used": completed.get("schemes_used", []),
                 "scheme_by_port": completed.get("scheme_by_port", {}),
-                "https_fallback": completed.get("https_fallback", started.get("https_fallback", False)),
+                "https_fallback": False,
+                "https_targets_skipped": completed.get("https_targets_skipped")
+                or started.get("https_targets_skipped")
+                or skipped.get("https_targets_skipped", []),
                 "http_targets": completed.get("http_targets") or started.get("http_targets", []),
                 "https_targets": completed.get("https_targets") or started.get("https_targets", []),
                 "skipped_no_http_service": skipped.get("skipped_no_http_service", False),
+                "http_targets_not_found": skipped.get("http_targets_not_found", False)
+                or skipped.get("reason") == "HTTP_TARGETS_NOT_FOUND",
                 "duration_sec": completed.get("duration_sec"),
-                "concurrency": started.get("concurrency") or completed.get("concurrency"),
-                "requests_per_second": completed.get("requests_per_second"),
-                "transport": completed.get("transport") or started.get("transport"),
-                "concentrated_target": completed.get("concentrated_target") or started.get("concentrated_target"),
-                "host_distribution": completed.get("host_distribution", {}),
-                "path_distribution": completed.get("path_distribution", {}),
-                "method_distribution": completed.get("method_distribution", {}),
-                "request_dump_sample_count": dump_summary.get("sample_count", 0),
-                "request_dump_summary": dump_summary,
+                "response_code_distribution": completed.get("response_code_distribution", {}),
                 "selected_http_target_reason": completed.get("selected_http_target_reason")
                 or started.get("selected_http_target_reason", ""),
-                "response_code_distribution": completed.get("response_code_distribution", {}),
                 "redirect_only_warning": completed.get("redirect_only_warning", False),
                 "probe_summaries": completed.get("probe_summaries") or started.get("probe_summaries", []),
                 "redirect_only_candidates": completed.get("redirect_only_candidates")
                 or started.get("redirect_only_candidates", []),
                 "target_count": completed.get("target_count", len(completed.get("target_distribution", {}))),
+                "concentrated_target": completed.get("concentrated_target", ""),
                 "target_distribution": completed.get("target_distribution", {}),
                 "selected_targets": completed.get("selected_targets")
                 or started.get("selected_targets", []),
@@ -192,6 +173,13 @@ def build_traffic_summary(
                 "payload_count": completed.get("payload_count", 0),
                 "payload_category_distribution": completed.get("payload_category_distribution", {}),
                 "transport_distribution": completed.get("transport_distribution", {}),
+                "ports_used": completed.get("ports_used", started.get("ports_used", [])),
+                "schemes_used": completed.get("schemes_used", started.get("schemes_used", [])),
+                "https_targets_skipped": completed.get("https_targets_skipped")
+                or started.get("https_targets_skipped")
+                or skipped.get("https_targets_skipped", []),
+                "http_targets_not_found": skipped.get("http_targets_not_found", False)
+                or skipped.get("reason") == "HTTP_TARGETS_NOT_FOUND",
                 "duration_sec": completed.get("duration_sec"),
                 "sql_injection_requests_jsonl": completed.get("sql_injection_requests_jsonl", ""),
             })

@@ -10,7 +10,6 @@ import urllib.request
 from typing import Any
 
 from dsp.protocols.base import HttpProtocolError
-from dsp.protocols.http.curl_transport import curl_available, send_request_curl
 from dsp.protocols.http.urls import PlannedHttpRequest
 from dsp.protocols.types import HttpRequest, HttpResponseResult
 
@@ -29,7 +28,8 @@ def send_request(
     timeout: float = DEFAULT_TIMEOUT_SEC,
     verify_tls: bool = False,
     headers: dict[str, str] | None = None,
-    body: str | bytes | None = None,
+    body: bytes | None = None,
+    content_type: str | None = None,
 ) -> HttpResponseResult:
     """Send a single HTTP/HTTPS request. Redirects are not followed."""
     request_id = uuid.uuid4().hex[:8]
@@ -37,12 +37,11 @@ def send_request(
 
     request_headers = dict(headers) if headers else {}
     request_headers.setdefault("User-Agent", "dsp-http-followup/1.0")
-    data = None
-    if body is not None:
-        data = body.encode("utf-8") if isinstance(body, str) else body
+    if content_type:
+        request_headers.setdefault("Content-Type", content_type)
     req = urllib.request.Request(
         url,
-        data=data,
+        data=body,
         method=method.upper(),
         headers=request_headers,
     )
@@ -55,10 +54,7 @@ def send_request(
 
     try:
         opener = urllib.request.build_opener(_NoRedirectHandler)
-        open_kwargs: dict[str, Any] = {"timeout": timeout}
-        if context is not None:
-            open_kwargs["context"] = context
-        with opener.open(req, **open_kwargs) as resp:
+        with opener.open(req, timeout=timeout, context=context) as resp:
             status_code = getattr(resp, "status", resp.getcode())
             summary = {
                 "status_code": status_code,
@@ -127,32 +123,21 @@ class HttpClient:
         mock: bool = True,
         timeout: float = DEFAULT_TIMEOUT_SEC,
         verify_tls: bool = False,
-        transport: str = "auto",
     ) -> None:
         resolved = self._resolve_mode(mode=mode, dry_run=dry_run, mock=mock)
         if resolved not in ("mock", "live"):
             raise HttpProtocolError(f"Invalid HTTP client mode: {resolved!r}")
-        if transport not in ("auto", "curl", "urllib"):
-            raise HttpProtocolError(f"Invalid HTTP transport: {transport!r}")
         self.mode = resolved
         self.dry_run = resolved == "mock"
         self.mock = resolved == "mock"
         self.timeout = timeout
         self.verify_tls = verify_tls
-        self.transport = transport
 
     @staticmethod
     def _resolve_mode(*, mode: str | None, dry_run: bool, mock: bool) -> str:
         if mode is not None:
             return mode
         return "mock" if (dry_run or mock) else "live"
-
-    def _use_curl(self) -> bool:
-        if self.transport == "urllib":
-            return False
-        if self.transport == "curl":
-            return curl_available()
-        return curl_available()
 
     def request(
         self,
@@ -165,23 +150,14 @@ class HttpClient:
         if self.mode == "live":
             if mock_outcome is not None:
                 raise HttpProtocolError("mock_outcome is not supported in live mode")
-            body = getattr(planned, "body", None)
-            if self._use_curl():
-                return send_request_curl(
-                    planned.url,
-                    method=planned.method,
-                    timeout=self.timeout,
-                    verify_tls=self.verify_tls,
-                    headers=planned.headers,
-                    body=body,
-                )
             return send_request(
                 planned.url,
                 method=planned.method,
                 timeout=self.timeout,
                 verify_tls=self.verify_tls,
                 headers=planned.headers,
-                body=body,
+                body=planned.body,
+                content_type=planned.content_type,
             )
         return self._mock_request(planned, mock_status_code=mock_status_code, mock_outcome=mock_outcome)
 
@@ -225,7 +201,6 @@ class HttpClient:
             method=planned.method,
             host=planned.host,
             port=planned.port,
-            path=planned.full_path if hasattr(planned, "full_path") else planned.path,
+            path=planned.full_path,
             headers=planned.headers,
-            body=getattr(planned, "body", None),
         )
