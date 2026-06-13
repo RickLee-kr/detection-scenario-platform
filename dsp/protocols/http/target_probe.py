@@ -30,6 +30,7 @@ class HttpEndpointProbeStats:
     scheme: str
     status_counts: dict[int, int] = field(default_factory=dict)
     timeouts: int = 0
+    errors: int = 0
 
     @property
     def error_response_count(self) -> int:
@@ -43,6 +44,14 @@ class HttpEndpointProbeStats:
     def success_count(self) -> int:
         return sum(
             count for code, count in self.status_counts.items() if 200 <= code < 300
+        )
+
+    @property
+    def useful_error_probe_count(self) -> int:
+        return (
+            self.status_counts.get(400, 0)
+            + self.status_counts.get(403, 0)
+            + self.status_counts.get(404, 0)
         )
 
     @property
@@ -62,7 +71,12 @@ class HttpEndpointProbeStats:
         p302 = sum(self.status_counts.get(code, 0) for code in (302, 303, 307, 308))
         return p400 * 1000 + p403 * 500 + p404 * 300 - p301 * 10000 - p302 * 10000 - self.timeouts * 100
 
-    def to_summary(self) -> dict[str, int | str]:
+    def to_summary(
+        self,
+        *,
+        selected: bool = False,
+        rejection_reason: str = "",
+    ) -> dict[str, int | str | bool]:
         return {
             "host": self.host,
             "port": self.port,
@@ -70,11 +84,13 @@ class HttpEndpointProbeStats:
             "probe_400": self.status_counts.get(400, 0),
             "probe_403": self.status_counts.get(403, 0),
             "probe_404": self.status_counts.get(404, 0),
-            "probe_301": self.status_counts.get(301, 0),
             "probe_success": self.success_count,
             "probe_timeout": self.timeouts,
-            "detection_score": self.detection_score(),
+            "probe_error": self.errors,
             "redirect_only": int(self.is_redirect_only),
+            "detection_score": self.detection_score(),
+            "selected": selected,
+            "rejection_reason": rejection_reason,
         }
 
 
@@ -113,7 +129,10 @@ def probe_http_endpoint(
         request = client.make_request(plan)
         result = client.request(request)
         if result.outcome != "response" or result.status_code is None:
-            stats.timeouts += 1
+            if result.outcome == "timeout":
+                stats.timeouts += 1
+            else:
+                stats.errors += 1
             continue
         code = int(result.status_code)
         stats.status_counts[code] = stats.status_counts.get(code, 0) + 1
@@ -130,6 +149,26 @@ def is_no_response_probe(stats: HttpEndpointProbeStats) -> bool:
     return not stats.status_counts
 
 
+def has_useful_error_probe(stats: HttpEndpointProbeStats) -> bool:
+    return stats.useful_error_probe_count > 0
+
+
+def is_selectable_http_endpoint(stats: HttpEndpointProbeStats) -> bool:
+    """
+    Endpoint is selectable only after observed useful probe response.
+
+    Priority tiers: 400/403/404 > 2xx success.
+    Excludes redirect-only, timeout-only, reset-only, and no-response.
+    """
+    if is_no_response_probe(stats):
+        return False
+    if stats.is_redirect_only:
+        return False
+    if has_useful_error_probe(stats):
+        return True
+    return stats.success_count > 0
+
+
 def port_priority_rank(port: int) -> int:
     """Lower rank = earlier in HTTP_PORT_PRIORITY (used as final tiebreaker)."""
     try:
@@ -142,17 +181,14 @@ def probe_quality_sort_key(stats: HttpEndpointProbeStats) -> tuple[int, int, int
     """
     Sort key for endpoint selection — lower tuple = higher priority.
 
-    Priority: 400/404 eligible > other responses > redirect-only > no response,
-    then detection_score, then port priority.
+    Priority: useful error probes > success probes > port priority.
     """
-    if is_eligible_url_scan_target(stats):
+    if has_useful_error_probe(stats):
         tier = 0
-    elif has_response_generating_probe(stats):
+    elif stats.success_count > 0:
         tier = 1
-    elif stats.is_redirect_only:
-        tier = 2
     else:
-        tier = 3
+        tier = 2
     return (tier, -stats.detection_score(), port_priority_rank(stats.port))
 
 
@@ -160,22 +196,46 @@ def probe_all_http_candidates(
     candidates: list[tuple[str, int, str]],
     *,
     client: HttpClient,
+    max_workers: int = 16,
 ) -> list[HttpEndpointProbeStats]:
     """Probe every HTTP candidate endpoint (all allowed ports per host)."""
-    probed: list[HttpEndpointProbeStats] = []
-    for idx, (host, port, scheme) in enumerate(candidates):
-        probed.append(probe_http_endpoint(host, port, scheme, client=client, index=idx))
-    return probed
+    if not candidates:
+        return []
+
+    if len(candidates) == 1:
+        host, port, scheme = candidates[0]
+        return [probe_http_endpoint(host, port, scheme, client=client, index=0)]
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    indexed: list[HttpEndpointProbeStats | None] = [None] * len(candidates)
+    worker_count = max(1, min(max_workers, len(candidates)))
+    with ThreadPoolExecutor(max_workers=worker_count) as pool:
+        future_map = {
+            pool.submit(
+                probe_http_endpoint,
+                host,
+                port,
+                scheme,
+                client=client,
+                index=idx,
+            ): idx
+            for idx, (host, port, scheme) in enumerate(candidates)
+        }
+        for future in as_completed(future_map):
+            idx = future_map[future]
+            indexed[idx] = future.result()
+    return [stats for stats in indexed if stats is not None]
 
 
 def pick_best_endpoint_per_host(
     stats_list: list[HttpEndpointProbeStats],
 ) -> dict[str, HttpEndpointProbeStats]:
     """
-    Pick the best probed endpoint per host.
+    Pick the best selectable probed endpoint per host.
 
-    Never returns a no-response endpoint when a response-generating endpoint
-    exists on the same host.
+    Hosts with no selectable endpoint are omitted.
+    Never returns a no-response endpoint when a selectable endpoint exists on the same host.
     """
     groups: dict[str, list[HttpEndpointProbeStats]] = {}
     for stats in stats_list:
@@ -183,10 +243,59 @@ def pick_best_endpoint_per_host(
 
     best: dict[str, HttpEndpointProbeStats] = {}
     for host, host_stats in groups.items():
-        responding = [s for s in host_stats if has_response_generating_probe(s)]
-        pool = responding if responding else host_stats
-        best[host] = min(pool, key=probe_quality_sort_key)
+        selectable = [s for s in host_stats if is_selectable_http_endpoint(s)]
+        if not selectable:
+            continue
+        best[host] = min(selectable, key=probe_quality_sort_key)
     return best
+
+
+def rejection_reason_for(
+    stats: HttpEndpointProbeStats,
+    *,
+    selected_keys: set[tuple[str, int]],
+    selectable_exists_globally: bool,
+) -> str:
+    key = (stats.host, stats.port)
+    if key in selected_keys:
+        return ""
+    if is_selectable_http_endpoint(stats):
+        return "lower_probe_quality_or_host_limit"
+    if is_no_response_probe(stats):
+        if stats.timeouts > 0 and stats.errors == 0:
+            return "timeout_only"
+        if stats.errors > 0 and stats.timeouts == 0:
+            return "connection_error"
+        if stats.timeouts > 0 or stats.errors > 0:
+            return "timeout_or_connection_error"
+        return "no_response"
+    if stats.is_redirect_only:
+        return "redirect_only"
+    if has_response_generating_probe(stats) and selectable_exists_globally:
+        return "no_useful_probe_response"
+    return "no_useful_probe_response"
+
+
+def build_probe_debug_summaries(
+    probed: list[HttpEndpointProbeStats],
+    selected: list[tuple[str, int]],
+) -> list[dict[str, int | str | bool]]:
+    selected_keys = set(selected)
+    selectable_exists = any(is_selectable_http_endpoint(stats) for stats in probed)
+    summaries: list[dict[str, int | str | bool]] = []
+    for stats in probed:
+        key = (stats.host, stats.port)
+        summaries.append(
+            stats.to_summary(
+                selected=key in selected_keys,
+                rejection_reason=rejection_reason_for(
+                    stats,
+                    selected_keys=selected_keys,
+                    selectable_exists_globally=selectable_exists,
+                ),
+            )
+        )
+    return summaries
 
 
 def rank_probe_candidates(
@@ -203,11 +312,13 @@ def rank_probe_candidates(
 
 
 def selection_reason_for(stats: HttpEndpointProbeStats) -> str:
-    if stats.error_response_count > 0:
+    if has_useful_error_probe(stats):
         return "error_responses_available"
-    if not stats.is_redirect_only:
-        return "not_redirect_only"
-    return "redirect_only_low_priority"
+    if stats.success_count > 0:
+        return "success_responses_available"
+    if stats.is_redirect_only:
+        return "redirect_only_low_priority"
+    return "no_useful_probe_response"
 
 
 def is_eligible_url_scan_target(stats: HttpEndpointProbeStats) -> bool:

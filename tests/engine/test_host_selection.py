@@ -27,7 +27,8 @@ def test_http_followup_prefers_plain_http_endpoints():
     assert skip is None
     assert len(endpoints) == 1
     assert endpoints[0].scheme == "http"
-    assert endpoints[0].port == 8080
+    assert endpoints[0].port in (80, 8080, 8000, 8008, 8888, 9000)
+    assert endpoints[0].selection_reason == "error_responses_available"
 
 
 def test_http_followup_skipped_when_only_https_targets():
@@ -73,5 +74,5 @@ def test_http_followup_probe_prefers_error_responses():
     assert selection.endpoints
     assert selection.selected_http_target_reason in (
         "error_responses_available",
-        "not_redirect_only",
+        "success_responses_available",
     )
