@@ -51,6 +51,22 @@ def select_followup_endpoints(
     )
 
 
+def select_followup_hosts(
+    targets: TargetSet,
+    config: dict,
+    *,
+    max_hosts: int = MAX_HOSTS_DEFAULT,
+) -> list[str]:
+    """Return host IPs for progress output — mirrors executor endpoint selection."""
+    if config.get("hosts"):
+        return [str(h) for h in config["hosts"]][:max_hosts]
+    selection = select_followup_endpoints(targets, config, max_hosts=max_hosts)
+    if selection.endpoints:
+        return [ep.host for ep in selection.endpoints]
+    http_hosts = targets.hosts_for_capability("http_targets")
+    return http_hosts[:max_hosts]
+
+
 def _target_key(host: str, port: int) -> str:
     return f"{host}:{port}"
 

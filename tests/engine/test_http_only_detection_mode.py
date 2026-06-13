@@ -88,6 +88,21 @@ def test_https_ports_not_in_detection_priority():
     assert HTTPS_PORT_PRIORITY == (443, 8443)
 
 
+def test_target_selection_host_selectors_exist():
+    from dsp.runner.target_selection import resolve_scenario_targets
+
+    targets = TargetSet(
+        target_net="10.10.10.0/24",
+        service_hosts={"http_targets": ["10.10.10.20"]},
+        service_endpoints={"http_targets": [("10.10.10.20", 8080)]},
+        discovery_enabled=True,
+    )
+    http_hosts = resolve_scenario_targets("http_followup", targets, {"max_hosts": 2})
+    sqli_hosts = resolve_scenario_targets("sql_injection", targets, {"max_hosts": 2})
+    assert http_hosts == ["10.10.10.20"]
+    assert sqli_hosts == ["10.10.10.20"]
+
+
 def _only_https_targets() -> TargetSet:
     return TargetSet(
         target_net="10.10.10.0/24",

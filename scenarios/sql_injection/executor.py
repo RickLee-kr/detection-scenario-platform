@@ -67,6 +67,27 @@ def select_sqli_endpoints(
     )
 
 
+def select_sqli_hosts(
+    targets: TargetSet,
+    config: dict,
+    *,
+    max_hosts: int = MAX_HOSTS_DEFAULT,
+) -> list[str]:
+    """Return host IPs for progress output — mirrors executor endpoint selection."""
+    if config.get("hosts"):
+        return [str(h) for h in config["hosts"]][:max_hosts]
+    selection = select_sqli_endpoints(
+        targets,
+        config,
+        max_hosts=max_hosts,
+        client=HttpClient(mode="mock"),
+    )
+    if selection.endpoints:
+        return [ep.host for ep in selection.endpoints]
+    http_hosts = targets.hosts_for_capability("http_targets")
+    return http_hosts[:max_hosts]
+
+
 def _emit_sqli_skipped(
     ctx: RunContext,
     *,
