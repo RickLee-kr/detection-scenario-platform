@@ -18,6 +18,7 @@ from dsp.execution.remote import (
     RemoteEventCollectionRequest,
     RemoteEventCollectionResult,
     RemoteEventCollector,
+    RemoteEventCollectionError,
     UnsupportedRemoteProviderError,
 )
 from dsp.execution.webshell.event_sync import (
@@ -50,11 +51,13 @@ def _collection_request(
     remote_execution_id: str = "exec01",
     remote_bundle_path: str = "/tmp/dsp/exec01/events.jsonl",
     local_bundle_path: str | Path | None = None,
+    diagnostics_dir: str | Path | None = None,
 ) -> RemoteEventCollectionRequest:
     return RemoteEventCollectionRequest(
         remote_execution_id=remote_execution_id,
         remote_bundle_path=remote_bundle_path,
         local_bundle_path=local_bundle_path,
+        diagnostics_dir=diagnostics_dir,
     )
 
 
@@ -68,6 +71,7 @@ def _mock_webshell_provider(
     *,
     download_return: RuntimeArtifact | None = None,
     download_side_effect=None,
+    cat_return: bytes | None = None,
 ) -> MagicMock:
     provider = MagicMock(spec=WebshellExecutionProvider)
     provider.provider_type = "webshell"
@@ -75,6 +79,9 @@ def _mock_webshell_provider(
         provider.download_file.side_effect = download_side_effect
     else:
         provider.download_file.return_value = download_return
+    provider.fetch_remote_file_via_cat.return_value = (
+        cat_return if cat_return is not None else b""
+    )
     return provider
 
 
@@ -413,13 +420,83 @@ def test_sync_validation_error_propagates(tmp_path: Path):
     bundle_path.write_text("{not-json}\n", encoding="utf-8")
     provider = _mock_webshell_provider(
         download_return=_artifact_for_path("/remote/events.jsonl", bundle_path),
+        cat_return=b"{still-not-json}\n",
     )
-    with pytest.raises(BundleValidationError):
+    diagnostics_dir = tmp_path / "diagnostics"
+    with pytest.raises(RemoteEventCollectionError, match="remote event bundle collection failed"):
         RemoteEventCollector().collect(
-            _collection_request(),
+            _collection_request(diagnostics_dir=diagnostics_dir),
             provider,
             _open_store(),
         )
+    assert (diagnostics_dir / "downloaded_events.remote_path.raw").read_bytes() == b"{not-json}\n"
+    assert (diagnostics_dir / "downloaded_events.cat.raw").read_bytes() == b"{still-not-json}\n"
+    error_text = (diagnostics_dir / "collection_error.txt").read_text(encoding="utf-8")
+    assert "remote_path preview:" in error_text
+    assert "cat preview:" in error_text
+    provider.fetch_remote_file_via_cat.assert_called_once_with("/tmp/dsp/exec01/events.jsonl")
+
+
+def test_remote_path_html_cat_valid_jsonl_succeeds(tmp_path: Path):
+    html_path = tmp_path / "html.jsonl"
+    html_path.write_text("<html><body>shell</body></html>", encoding="utf-8")
+    valid_bundle = tmp_path / "valid.jsonl"
+    write_bundle(valid_bundle, [event_record()])
+    provider = _mock_webshell_provider(
+        download_return=_artifact_for_path("/remote/events.jsonl", html_path),
+        cat_return=valid_bundle.read_bytes(),
+    )
+    result = RemoteEventCollector().collect(
+        _collection_request(),
+        provider,
+        _open_store(),
+    )
+    assert result.events_imported == 1
+    assert result.collection_metadata["collection_source"] == "cat"
+    provider.fetch_remote_file_via_cat.assert_called_once_with("/tmp/dsp/exec01/events.jsonl")
+
+
+def test_remote_path_empty_cat_valid_jsonl_succeeds(tmp_path: Path):
+    empty_path = tmp_path / "empty.jsonl"
+    empty_path.write_bytes(b"")
+    valid_bundle = tmp_path / "valid.jsonl"
+    write_bundle(valid_bundle, [event_record()])
+    provider = _mock_webshell_provider(
+        download_return=_artifact_for_path("/remote/events.jsonl", empty_path),
+        cat_return=valid_bundle.read_bytes(),
+    )
+    result = RemoteEventCollector().collect(
+        _collection_request(),
+        provider,
+        _open_store(),
+    )
+    assert result.events_imported == 1
+    assert result.collection_metadata["collection_source"] == "cat"
+
+
+def test_both_invalid_writes_diagnostics_without_traceback_only(tmp_path: Path):
+    remote_path = tmp_path / "remote.jsonl"
+    remote_path.write_bytes(b"<html></html>")
+    provider = _mock_webshell_provider(
+        download_return=_artifact_for_path("/remote/events.jsonl", remote_path),
+        cat_return=b"cat: /remote/events.jsonl: No such file or directory\n",
+    )
+    diagnostics_dir = tmp_path / "run-artifacts"
+    with pytest.raises(RemoteEventCollectionError) as exc_info:
+        RemoteEventCollector().collect(
+            RemoteEventCollectionRequest(
+                remote_execution_id="exec01",
+                remote_bundle_path="/remote/events.jsonl",
+                diagnostics_dir=diagnostics_dir,
+            ),
+            provider,
+            _open_store(),
+        )
+    assert exc_info.value.diagnostics_dir == str(diagnostics_dir)
+    assert "HTML response" in str(exc_info.value)
+    assert (diagnostics_dir / "downloaded_events.remote_path.raw").exists()
+    assert (diagnostics_dir / "downloaded_events.cat.raw").exists()
+    assert (diagnostics_dir / "collection_error.txt").exists()
 
 
 def test_sync_run_id_mismatch_propagates(tmp_path: Path):

@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from dsp.execution.webshell.event_sync.bundle_content import content_preview
 from dsp.execution.webshell.event_sync.exceptions import (
     BundleNotFoundError,
     BundleValidationError,
@@ -49,8 +50,10 @@ def load_jsonl_bundle(bundle_path: str | Path) -> EventBundle:
             try:
                 record = json.loads(line)
             except json.JSONDecodeError as exc:
+                preview = content_preview(raw_line.encode("utf-8"))
                 raise BundleValidationError(
-                    f"malformed JSON at line {line_number}: {exc.msg}",
+                    f"malformed JSON at line {line_number}: {exc.msg}; "
+                    f"content preview: {preview}",
                     rule="malformed_json",
                     line_number=line_number,
                 ) from exc

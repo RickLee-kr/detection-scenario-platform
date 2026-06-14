@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import re
-import shlex
 import tempfile
 import urllib.parse
 from datetime import datetime, timezone
@@ -21,10 +19,9 @@ from dsp.execution.providers.runtime.transport import (
     TransportRuntimeConfiguration,
 )
 from dsp.execution.providers.webshell.jsp.jsp_command_encoder import JspCommandEncoder
+from dsp.execution.webshell.cat_transport import read_remote_file_via_cat
+from dsp.execution.webshell.event_sync.bundle_content import validate_jsonl_content
 from dsp.execution.webshell.transport.models import TransportRequest, TransportResponse
-
-_EXIT_CODE_MARKER = re.compile(rb"\n__EXIT_CODE:\d+\s*$")
-_CAT_DOWNLOAD_FALLBACK_MARKERS = frozenset({b"ready", b"ok"})
 
 
 class JspWebshellRuntime(TransportBackedRuntime):
@@ -144,8 +141,8 @@ class JspWebshellRuntime(TransportBackedRuntime):
             ),
         )
         body = response.body
-        if self._should_fallback_to_cat_download(body, artifact.remote_path):
-            body = self._download_file_via_cat(artifact.remote_path)
+        if self._should_fallback_to_cat_download(body):
+            body = read_remote_file_via_cat(self, artifact.remote_path)
         if artifact.local_path:
             local_path = artifact.local_path
             dest = Path(local_path)
@@ -167,30 +164,10 @@ class JspWebshellRuntime(TransportBackedRuntime):
             size_bytes=len(body),
         )
 
-    def _download_file_via_cat(self, remote_path: str) -> bytes:
-        cat_command = f"cat {shlex.quote(remote_path)}"
-        encoded_payload = self._command_encoder.encode_request(
-            CommandRequest.new(cat_command)
-        )
-        transport_request = self._command_transport_request(
-            encoded_payload,
-            transport_method="send_get",
-            timeout_seconds=300.0,
-        )
-        response = self._transport.send_get(transport_request)
-        return _strip_webshell_exit_marker(response.body)
-
     @staticmethod
-    def _should_fallback_to_cat_download(body: bytes, remote_path: str) -> bool:
-        stripped = body.strip()
-        if not stripped:
-            return True
-        if stripped in _CAT_DOWNLOAD_FALLBACK_MARKERS:
-            return True
-        # Typical JSP shells only implement ``cmd`` — ``remote_path`` GET returns HTML/text.
-        if remote_path.endswith(".jsonl") and not stripped.startswith(b"{"):
-            return True
-        return False
+    def _should_fallback_to_cat_download(body: bytes) -> bool:
+        validation = validate_jsonl_content(body)
+        return not validation.valid
 
     @staticmethod
     def _jsp_execution_metadata(
@@ -209,7 +186,3 @@ class JspWebshellRuntime(TransportBackedRuntime):
             "delivery_only": True,
             "jsp_command_param": JspCommandEncoder.COMMAND_PARAM,
         }
-
-
-def _strip_webshell_exit_marker(body: bytes) -> bytes:
-    return _EXIT_CODE_MARKER.sub(b"", body.rstrip())

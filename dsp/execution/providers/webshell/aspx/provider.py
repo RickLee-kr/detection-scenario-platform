@@ -113,6 +113,13 @@ class AspxWebshellProvider(GenericWebshellProvider):
         artifact = RuntimeArtifact.new(remote_path=remote_path)
         return runtime.download_artifact(session, artifact)
 
+    def fetch_remote_file_via_cat(self, remote_path: str) -> bytes:
+        """Read a remote file through the ASPX ``cat`` command transport."""
+        from dsp.execution.webshell.cat_transport import read_remote_file_via_cat
+
+        runtime = self._require_aspx_runtime()
+        return read_remote_file_via_cat(runtime, remote_path)
+
     def cleanup(self) -> None:
         """Release runtime session state."""
         runtime = self._runtime

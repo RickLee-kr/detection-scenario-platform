@@ -320,7 +320,9 @@ def test_family_upload_download_cleanup(
 ):
     local = tmp_path / f"{provider_type}_payload.txt"
     local.write_text("data")
-    backend = RecordingHttpBackend(responses=[_ok(b"uploaded"), _ok(b"bytes")])
+    backend = RecordingHttpBackend(
+        responses=[_ok(b"uploaded"), _ok(b'{"_bundle_metadata":true}\n')]
+    )
     provider = _connected_provider(provider_cls, shell_name, backend)
     upload = provider.upload_file(local, "/tmp/dsp_stub/payload.txt")
     assert upload.transfer_status == "uploaded"

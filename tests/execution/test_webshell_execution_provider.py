@@ -457,7 +457,7 @@ def test_bridge_upload_transport_delivery(family, provider_cls, filename, tmp_pa
 
 @pytest.mark.parametrize("family,provider_cls,filename", FAMILY_CASES)
 def test_bridge_download_transport_delivery(family, provider_cls, filename):
-    backend = RecordingHttpBackend(responses=[_ok(b"file-bytes")])
+    backend = RecordingHttpBackend(responses=[_ok(b'{"_bundle_metadata":true}\n')])
     provider = _connected_provider(family, provider_cls, filename, backend)
     provider.prepare(_exec_context())
     artifact = provider.download_file(f"/tmp/dsp/{family}/events.jsonl")

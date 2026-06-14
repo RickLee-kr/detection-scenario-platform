@@ -198,6 +198,11 @@ class WebshellExecutionProvider(ExecutionProvider):
         provider = self._require_family_provider()
         return provider.download_file(remote_path)
 
+    def fetch_remote_file_via_cat(self, remote_path: str) -> bytes:
+        """Read a remote file through the selected webshell family ``cat`` transport."""
+        provider = self._require_family_provider()
+        return provider.fetch_remote_file_via_cat(remote_path)
+
     def cleanup(self, context: ExecutionContext) -> None:
         """Release webshell runtime session state."""
         if self._family_provider is not None:

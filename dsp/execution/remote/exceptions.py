@@ -20,3 +20,16 @@ class UnsupportedRemoteProviderError(RemoteScenarioRunnerError, TypeError):
 
 class RemoteEventCollectionError(Exception):
     """Base exception for remote event collection errors."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        diagnostics_dir: str | None = None,
+        remote_validation: object | None = None,
+        cat_validation: object | None = None,
+    ) -> None:
+        self.diagnostics_dir = diagnostics_dir
+        self.remote_validation = remote_validation
+        self.cat_validation = cat_validation
+        super().__init__(message)

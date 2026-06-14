@@ -149,7 +149,7 @@ def test_upload_file_invocation(tmp_path: Path):
 
 
 def test_download_file_invocation():
-    backend = RecordingHttpBackend(responses=[_ok(b"file-bytes")])
+    backend = RecordingHttpBackend(responses=[_ok(b'{"_bundle_metadata":true}\n')])
     provider = _connected_provider(backend)
     artifact = provider.download_file("/tmp/dsp_stub/run01/events.jsonl")
     assert artifact.transfer_status == "downloaded"

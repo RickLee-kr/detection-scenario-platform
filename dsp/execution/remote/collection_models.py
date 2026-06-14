@@ -14,6 +14,7 @@ class RemoteEventCollectionRequest:
     remote_execution_id: str
     remote_bundle_path: str
     local_bundle_path: str | Path | None = None
+    diagnostics_dir: str | Path | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload = {
@@ -22,15 +23,21 @@ class RemoteEventCollectionRequest:
         }
         if self.local_bundle_path is not None:
             payload["local_bundle_path"] = str(self.local_bundle_path)
+        if self.diagnostics_dir is not None:
+            payload["diagnostics_dir"] = str(self.diagnostics_dir)
         return payload
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> RemoteEventCollectionRequest:
         local_raw = data.get("local_bundle_path")
+        diagnostics_raw = data.get("diagnostics_dir")
         return cls(
             remote_execution_id=str(data["remote_execution_id"]),
             remote_bundle_path=str(data["remote_bundle_path"]),
             local_bundle_path=str(local_raw) if local_raw is not None else None,
+            diagnostics_dir=(
+                str(diagnostics_raw) if diagnostics_raw is not None else None
+            ),
         )
 
 
